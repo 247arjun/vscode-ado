@@ -1,0 +1,247 @@
+{
+  "name": "azure-devops-queries",
+  "displayName": "Azure DevOps Queries",
+  "description": "View Azure DevOps queries as a grouped tree in VS Code",
+  "version": "0.6.0",
+  "publisher": "your-publisher",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onView:adoQueries.results"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "adoQueries",
+          "title": "Azure DevOps Queries",
+          "icon": "$(checklist)"
+        }
+      ]
+    },
+    "views": {
+      "adoQueries": [
+        {
+          "id": "adoQueries.results",
+          "name": "Query Results"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "adoQueries.setQueryFromClipboard",
+        "title": "Azure DevOps: Add Query From Clipboard"
+      },
+      {
+        "command": "adoQueries.setQueryManual",
+        "title": "Azure DevOps: Add Query"
+      },
+      {
+        "command": "adoQueries.setGroupBy",
+        "title": "Azure DevOps: Configure Grouping"
+      },
+      {
+        "command": "adoQueries.refresh",
+        "title": "Azure DevOps: Refresh Queries",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "adoQueries.openWorkItem",
+        "title": "Open in Browser",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "adoQueries.openQueryInBrowser",
+        "title": "Azure DevOps: Open Query in Browser"
+      },
+      {
+        "command": "adoQueries.copyWorkItemId",
+        "title": "Copy Work Item ID"
+      },
+      {
+        "command": "adoQueries.expandAll",
+        "title": "Expand All",
+        "icon": "$(expand-all)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "adoQueries.refresh",
+          "when": "view == adoQueries.results",
+          "group": "navigation"
+        },
+        {
+          "command": "adoQueries.expandAll",
+          "when": "view == adoQueries.results",
+          "group": "navigation"
+        },
+        {
+          "command": "adoQueries.setQueryFromClipboard",
+          "when": "view == adoQueries.results"
+        },
+        {
+          "command": "adoQueries.setGroupBy",
+          "when": "view == adoQueries.results"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "adoQueries.openWorkItem",
+          "when": "view == adoQueries.results && viewItem == workItem",
+          "group": "inline"
+        },
+        {
+          "command": "adoQueries.copyWorkItemId",
+          "when": "view == adoQueries.results && viewItem == workItem"
+        },
+        {
+          "command": "adoQueries.openQueryInBrowser",
+          "when": "view == adoQueries.results && viewItem == query"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Azure DevOps Queries",
+      "properties": {
+        "adoQueries.organization": {
+          "type": "string",
+          "default": "",
+          "description": "Azure DevOps organization name or URL (e.g., 'MyOrg' or 'https://dev.azure.com/MyOrg/')"
+        },
+        "adoQueries.project": {
+          "type": "string",
+          "default": "",
+          "description": "Azure DevOps project name"
+        },
+        "adoQueries.detectFromGit": {
+          "type": "boolean",
+          "default": true,
+          "description": "Allow CLI to detect org/project from Git repository configuration"
+        },
+        "adoQueries.queries": {
+          "type": "array",
+          "default": [],
+          "description": "Array of query definitions. Each query appears as a top-level node in the tree.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Display name for this query (custom, not tied to ADO query name)"
+              },
+              "organization": {
+                "type": "string",
+                "description": "Azure DevOps organization (overrides global setting)"
+              },
+              "project": {
+                "type": "string",
+                "description": "Azure DevOps project (overrides global setting)"
+              },
+              "queryId": {
+                "type": "string",
+                "description": "Query GUID"
+              },
+              "queryPath": {
+                "type": "string",
+                "description": "Query path (alternative to queryId)"
+              },
+              "groupBy": {
+                "type": "array",
+                "description": "Optional per-query grouping. Falls back to global adoQueries.groupBy if not specified.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "field": { "type": "string" },
+                    "projection": { "type": "string" },
+                    "missingLabel": { "type": "string" },
+                    "bucket": { "type": "string" }
+                  },
+                  "required": ["field"]
+                }
+              },
+              "collapsed": {
+                "type": "boolean",
+                "default": false,
+                "description": "Start this query collapsed"
+              }
+            },
+            "required": ["name"]
+          }
+        },
+        "adoQueries.groupBy": {
+          "type": "array",
+          "default": [
+            {
+              "field": "System.State",
+              "missingLabel": "(no state)"
+            }
+          ],
+          "description": "Array of grouping specifications (up to 5 levels)",
+          "items": {
+            "type": "object",
+            "properties": {
+              "field": {
+                "type": "string",
+                "description": "Work item field reference name"
+              },
+              "projection": {
+                "type": "string",
+                "description": "For identity fields, which property to use (e.g., displayName)"
+              },
+              "missingLabel": {
+                "type": "string",
+                "description": "Label to show when field value is missing"
+              },
+              "bucket": {
+                "type": "string",
+                "enum": ["date"],
+                "description": "Bucketing strategy"
+              },
+              "dateBucket": {
+                "type": "string",
+                "description": "Date bucket categories (overdue|today|thisWeek|future|none)"
+              }
+            },
+            "required": ["field"]
+          }
+        },
+        "adoQueries.maxItems": {
+          "type": "integer",
+          "default": 500,
+          "description": "Maximum number of work items to fetch"
+        },
+        "adoQueries.refreshIntervalSeconds": {
+          "type": "integer",
+          "default": 0,
+          "description": "Auto-refresh interval in seconds (0 = manual only)"
+        },
+        "adoQueries.cacheTtlSeconds": {
+          "type": "integer",
+          "default": 30,
+          "description": "Cache time-to-live in seconds"
+        },
+        "adoQueries.batchSize": {
+          "type": "integer",
+          "default": 200,
+          "description": "Batch size for fetching work items (max 200)"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.0"
+  }
+}
