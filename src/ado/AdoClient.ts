@@ -1,6 +1,9 @@
 import { AzCliRunner, CliResult } from './AzCliRunner';
 import { Settings, QueryDefinition } from '../config/Settings';
 import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
 /**
  * Work item from ADO
@@ -32,14 +35,33 @@ interface BatchWorkItemsResponse {
 }
 
 /**
+ * Query metadata from ADO
+ */
+export interface QueryMetadata {
+    id: string;
+    name: string;
+    path: string;
+}
+
+/**
  * ADO client that uses Azure CLI for API calls
  */
 export class AdoClient {
     private cliRunner: AzCliRunner;
     private cache: Map<string, { data: WorkItem[]; timestamp: number }> = new Map();
+    private outputChannel: vscode.OutputChannel;
 
-    constructor(cliRunner?: AzCliRunner) {
+    constructor(cliRunner?: AzCliRunner, outputChannel?: vscode.OutputChannel) {
         this.cliRunner = cliRunner ?? new AzCliRunner();
+        this.outputChannel = outputChannel ?? vscode.window.createOutputChannel('Azure DevOps Queries');
+    }
+
+    /**
+     * Log a message to the output channel
+     */
+    private log(message: string): void {
+        const timestamp = new Date().toISOString();
+        this.outputChannel.appendLine(`[${timestamp}] ${message}`);
     }
 
     /**
@@ -106,7 +128,7 @@ export class AdoClient {
     /**
      * Fetch work items in batches using the REST API via az devops invoke
      */
-    async fetchWorkItemsBatch(ids: number[], fields: string[]): Promise<CliResult<WorkItem[]>> {
+    async fetchWorkItemsBatch(ids: number[], fields: string[], queryDef?: QueryDefinition): Promise<CliResult<WorkItem[]>> {
         if (ids.length === 0) {
             return { success: true, data: [], exitCode: 0 };
         }
@@ -114,6 +136,8 @@ export class AdoClient {
         const batchSize = Settings.batchSize;
         const allWorkItems: WorkItem[] = [];
         const batches = this.chunkArray(ids, batchSize);
+
+        this.log(`Fetching ${ids.length} work items in ${batches.length} batch(es)`);
 
         for (let i = 0; i < batches.length; i++) {
             const batch = batches[i];
@@ -126,9 +150,10 @@ export class AdoClient {
                 );
             }
 
-            const result = await this.fetchBatch(batch, fields);
+            const result = await this.fetchBatch(batch, fields, queryDef);
             
             if (!result.success) {
+                this.log(`Batch ${i + 1} failed: ${result.error?.message}`);
                 return result as CliResult<WorkItem[]>;
             }
             
@@ -137,31 +162,61 @@ export class AdoClient {
             }
         }
 
+        this.log(`Successfully fetched ${allWorkItems.length} work items`);
         return { success: true, data: allWorkItems, exitCode: 0 };
     }
 
     /**
-     * Fetch a single batch of work items
+     * Fetch a single batch of work items via az devops invoke (POST to workitemsbatch)
      */
-    private async fetchBatch(ids: number[], fields: string[]): Promise<CliResult<WorkItem[]>> {
-        // Use az devops invoke to call the REST API
-        const args = [
-            'devops', 'invoke',
-            '--area', 'wit',
-            '--resource', 'workitemsbatch',
-            '--http-method', 'POST',
-            '--api-version', '7.1',
-            '--in-file', '-'  // Read from stdin - but we can't do that, so we'll use alternative
-        ];
+    private async fetchBatch(ids: number[], fields: string[], queryDef?: QueryDefinition): Promise<CliResult<WorkItem[]>> {
+        // Write POST body to a temp file for az devops invoke --in-file
+        const body = JSON.stringify({ ids, fields });
+        const tmpFile = path.join(os.tmpdir(), `ado-batch-${Date.now()}.json`);
 
-        args.push(...this.getConnectionArgs());
+        try {
+            fs.writeFileSync(tmpFile, body, 'utf-8');
 
-        // Alternative: fetch each work item individually (less efficient but works without stdin)
-        // For now, use the simpler work-item show approach for each item
+            const args = [
+                'devops', 'invoke',
+                '--area', 'wit',
+                '--resource', 'workitemsbatch',
+                '--http-method', 'POST',
+                '--api-version', '7.1',
+                '--in-file', tmpFile
+            ];
+
+            args.push(...(queryDef ? this.getConnectionArgsForQuery(queryDef) : this.getConnectionArgs()));
+
+            this.log(`Batch request: ${ids.length} IDs, fields: ${fields.join(', ')}`);
+            const result = await this.cliRunner.execute<BatchWorkItemsResponse>(args);
+
+            if (result.success && result.data) {
+                const items = result.data.value ?? [];
+                return { success: true, data: items, exitCode: 0 };
+            }
+
+            // Fallback: if invoke fails (e.g. extension not supporting invoke), use individual fetch
+            if (!result.success) {
+                this.log(`Batch API failed, falling back to individual fetch: ${result.error?.message}`);
+                return this.fetchBatchIndividual(ids, queryDef);
+            }
+
+            return { success: true, data: [], exitCode: 0 };
+        } finally {
+            // Clean up temp file
+            try { fs.unlinkSync(tmpFile); } catch { /* ignore */ }
+        }
+    }
+
+    /**
+     * Fallback: fetch work items individually when batch API is unavailable
+     */
+    private async fetchBatchIndividual(ids: number[], queryDef?: QueryDefinition): Promise<CliResult<WorkItem[]>> {
         const workItems: WorkItem[] = [];
         
         for (const id of ids) {
-            const result = await this.fetchSingleWorkItem(id);
+            const result = await this.fetchSingleWorkItem(id, queryDef);
             if (result.success && result.data) {
                 workItems.push(result.data);
             }
@@ -173,15 +228,51 @@ export class AdoClient {
     /**
      * Fetch a single work item
      */
-    async fetchSingleWorkItem(id: number): Promise<CliResult<WorkItem>> {
+    async fetchSingleWorkItem(id: number, queryDef?: QueryDefinition): Promise<CliResult<WorkItem>> {
         const args = [
             'boards', 'work-item', 'show',
             '--id', id.toString()
         ];
 
-        args.push(...this.getConnectionArgs());
+        args.push(...(queryDef ? this.getConnectionArgsForQuery(queryDef) : this.getConnectionArgs()));
 
         return this.cliRunner.execute<WorkItem>(args);
+    }
+
+    /**
+     * Fetch query metadata (name, path) from ADO
+     */
+    async fetchQueryMetadata(queryId: string, org?: string, project?: string): Promise<QueryMetadata | undefined> {
+        const args = [
+            'devops', 'invoke',
+            '--area', 'wit',
+            '--resource', 'queries',
+            '--route-parameters', `id=${queryId}`,
+            '--http-method', 'GET',
+            '--api-version', '7.1'
+        ];
+
+        if (org) {
+            args.push('--org', this.normalizeOrgUrl(org));
+        } else if (Settings.organization) {
+            args.push('--org', this.normalizeOrgUrl(Settings.organization));
+        }
+        if (project) {
+            args.push('--project', project);
+        } else if (Settings.project) {
+            args.push('--project', Settings.project);
+        }
+
+        this.log(`Fetching query metadata for ${queryId}`);
+        const result = await this.cliRunner.execute<QueryMetadata>(args);
+        
+        if (result.success && result.data) {
+            this.log(`Query name: ${result.data.name}`);
+            return result.data;
+        }
+        
+        this.log(`Failed to fetch query metadata: ${result.error?.message}`);
+        return undefined;
     }
 
     /**
@@ -255,9 +346,11 @@ export class AdoClient {
         const now = Date.now();
         
         if (cached && (now - cached.timestamp) < Settings.cacheTtlSeconds * 1000) {
+            this.log(`Cache hit for "${queryDef.name}" (${cached.data.length} items)`);
             return { success: true, data: cached.data, exitCode: 0 };
         }
 
+        this.log(`Loading query "${queryDef.name}"...`);
         progress?.report({ message: `Loading ${queryDef.name}...` });
 
         // Build query args
@@ -284,19 +377,23 @@ export class AdoClient {
         args.push(...this.getConnectionArgsForQuery(queryDef));
         
         // Execute query
+        this.log(`Executing: az ${args.join(' ')}`);
         const queryResult = await this.cliRunner.execute<QueryResult[]>(args);
         
         if (!queryResult.success) {
+            this.log(`Query failed: ${queryResult.error?.message}`);
             return queryResult as CliResult<WorkItem[]>;
         }
         
         if (!queryResult.data || queryResult.data.length === 0) {
+            this.log(`Query "${queryDef.name}" returned 0 items`);
             return { success: true, data: [], exitCode: 0 };
         }
 
         // Limit results
         const maxItems = Settings.maxItems;
         const limitedResults = queryResult.data.slice(0, maxItems);
+        this.log(`Query "${queryDef.name}" returned ${queryResult.data.length} items (limited to ${limitedResults.length})`);
         
         // Get effective org/project for URL construction
         const effectiveOrg = queryDef.organization ?? Settings.organization;
@@ -357,6 +454,21 @@ export class AdoClient {
      */
     clearCache(): void {
         this.cache.clear();
+    }
+
+    /**
+     * Clear cache for a specific query
+     */
+    clearCacheForQuery(queryDef: QueryDefinition): void {
+        const key = this.getCacheKeyForQuery(queryDef);
+        this.cache.delete(key);
+    }
+
+    /**
+     * Get the output channel for external use
+     */
+    getOutputChannel(): vscode.OutputChannel {
+        return this.outputChannel;
     }
 
     /**

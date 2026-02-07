@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { AdoTreeProvider, AdoTreeItem } from './tree/AdoTreeProvider';
 import { Settings, QueryDefinition } from './config/Settings';
 import { WorkItemNode, QueryNode } from './grouping/GroupingEngine';
+import { extractQueryInfoFromUrl } from './utils/urlParser';
 
 let treeProvider: AdoTreeProvider | undefined;
 let treeView: vscode.TreeView<AdoTreeItem> | undefined;
@@ -20,7 +21,8 @@ export function activate(context: vscode.ExtensionContext) {
 
     context.subscriptions.push(treeView);
 
-    // Register commands
+    // ── Refresh commands ─────────────────────────────────────────────
+
     context.subscriptions.push(
         vscode.commands.registerCommand('adoQueries.refresh', () => {
             treeProvider?.forceRefresh();
@@ -28,16 +30,33 @@ export function activate(context: vscode.ExtensionContext) {
     );
 
     context.subscriptions.push(
+        vscode.commands.registerCommand('adoQueries.refreshQuery', async (node?: QueryNode | AdoTreeItem) => {
+            if (!treeProvider) return;
+
+            const queryNode = extractQueryNode(node);
+            if (queryNode) {
+                const index = treeProvider.findQueryIndex(queryNode);
+                if (index >= 0) {
+                    await treeProvider.refreshSingleQuery(index);
+                }
+            }
+        })
+    );
+
+    // ── Expand All ───────────────────────────────────────────────────
+
+    context.subscriptions.push(
         vscode.commands.registerCommand('adoQueries.expandAll', async () => {
             if (!treeProvider || !treeView) return;
             
-            // Get all top-level items and recursively expand them
             const topItems = await treeProvider.getChildren();
             for (const item of topItems) {
                 await expandItemRecursively(item);
             }
         })
     );
+
+    // ── Add Query from Clipboard ─────────────────────────────────────
 
     context.subscriptions.push(
         vscode.commands.registerCommand('adoQueries.setQueryFromClipboard', async () => {
@@ -51,11 +70,25 @@ export function activate(context: vscode.ExtensionContext) {
             // Try to extract query info from clipboard
             const parsed = extractQueryInfoFromUrl(clipboardText.trim());
             
+            // Try to auto-fetch query name from ADO if we have a queryId
+            let defaultName = 'New Query';
+            if (parsed.queryId && treeProvider) {
+                const adoClient = treeProvider.getAdoClient();
+                const metadata = await adoClient.fetchQueryMetadata(
+                    parsed.queryId,
+                    parsed.organization,
+                    parsed.project
+                );
+                if (metadata?.name) {
+                    defaultName = metadata.name;
+                }
+            }
+
             // Ask for a name for this query
             const name = await vscode.window.showInputBox({
                 prompt: 'Enter a display name for this query',
                 placeHolder: 'e.g., Sprint Tasks, My Bugs, etc.',
-                value: 'New Query'
+                value: defaultName
             });
 
             if (!name) {
@@ -98,24 +131,18 @@ export function activate(context: vscode.ExtensionContext) {
                 }
             }
 
-            // Add to existing queries
-            const existingQueries = Settings.queries;
-            const updatedQueries = [...existingQueries, newQuery];
-            
-            await vscode.workspace.getConfiguration('adoQueries').update(
-                'queries', 
-                updatedQueries, 
-                vscode.ConfigurationTarget.Global
-            );
+            // Add to existing queries, respecting scope
+            await addQueryToSettings(newQuery);
 
             vscode.window.showInformationMessage(`Added query: ${name}`);
             treeProvider?.forceRefresh();
         })
     );
 
+    // ── Add Query Manually ───────────────────────────────────────────
+
     context.subscriptions.push(
         vscode.commands.registerCommand('adoQueries.setQueryManual', async () => {
-            // Ask for a name for this query
             const name = await vscode.window.showInputBox({
                 prompt: 'Enter a display name for this query',
                 placeHolder: 'e.g., Sprint Tasks, My Bugs, etc.'
@@ -141,7 +168,6 @@ export function activate(context: vscode.ExtensionContext) {
 
             if (!value) return;
 
-            // Build new query definition with explicit groupBy
             const newQuery: QueryDefinition = { 
                 name,
                 groupBy: [
@@ -154,84 +180,130 @@ export function activate(context: vscode.ExtensionContext) {
                 newQuery.queryPath = value;
             }
 
-            // Add to existing queries
-            const existingQueries = Settings.queries;
-            const updatedQueries = [...existingQueries, newQuery];
-            
-            await vscode.workspace.getConfiguration('adoQueries').update(
-                'queries', 
-                updatedQueries, 
-                vscode.ConfigurationTarget.Global
-            );
+            await addQueryToSettings(newQuery);
 
             vscode.window.showInformationMessage(`Added query: ${name}`);
             treeProvider?.forceRefresh();
         })
     );
 
+    // ── Remove Query ─────────────────────────────────────────────────
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('adoQueries.removeQuery', async (node?: QueryNode | AdoTreeItem) => {
+            const queryNode = extractQueryNode(node);
+            if (!queryNode) return;
+
+            const confirm = await vscode.window.showWarningMessage(
+                `Remove query "${queryNode.name}"?`,
+                { modal: true },
+                'Remove'
+            );
+
+            if (confirm !== 'Remove') return;
+
+            const config = vscode.workspace.getConfiguration('adoQueries');
+            const queries = [...(config.get<QueryDefinition[]>('queries') ?? [])];
+            const index = queries.findIndex(q => 
+                q.name === queryNode.name && 
+                (q.queryId === queryNode.queryId || q.queryPath === queryNode.queryPath)
+            );
+            
+            if (index >= 0) {
+                queries.splice(index, 1);
+                await config.update('queries', queries, getSettingsTarget());
+                vscode.window.showInformationMessage(`Removed query: ${queryNode.name}`);
+                treeProvider?.forceRefresh();
+            }
+        })
+    );
+
+    // ── Rename Query ─────────────────────────────────────────────────
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('adoQueries.renameQuery', async (node?: QueryNode | AdoTreeItem) => {
+            const queryNode = extractQueryNode(node);
+            if (!queryNode) return;
+
+            const newName = await vscode.window.showInputBox({
+                prompt: 'Enter new name for this query',
+                value: queryNode.name
+            });
+
+            if (!newName || newName === queryNode.name) return;
+
+            const config = vscode.workspace.getConfiguration('adoQueries');
+            const queries = [...(config.get<QueryDefinition[]>('queries') ?? [])];
+            const index = queries.findIndex(q => 
+                q.name === queryNode.name && 
+                (q.queryId === queryNode.queryId || q.queryPath === queryNode.queryPath)
+            );
+            
+            if (index >= 0) {
+                queries[index] = { ...queries[index], name: newName };
+                await config.update('queries', queries, getSettingsTarget());
+                treeProvider?.forceRefresh();
+            }
+        })
+    );
+
+    // ── Configure Grouping ───────────────────────────────────────────
+
     context.subscriptions.push(
         vscode.commands.registerCommand('adoQueries.setGroupBy', async () => {
-            // Open settings UI for the groupBy configuration
             vscode.commands.executeCommand('workbench.action.openSettings', 'adoQueries.groupBy');
         })
     );
 
+    // ── Open Work Item ───────────────────────────────────────────────
+
     context.subscriptions.push(
         vscode.commands.registerCommand('adoQueries.openWorkItem', async (node: WorkItemNode | AdoTreeItem) => {
-            // Handle both direct node and tree item wrapper
-            let workItemNode: WorkItemNode | undefined;
-            
-            if ('type' in node && node.type === 'workItem') {
-                workItemNode = node;
-            } else if ('node' in node && node.node !== 'configure' && node.node !== 'error' && 
-                       node.node !== 'loading' && node.node !== 'empty' && node.node.type === 'workItem') {
-                workItemNode = node.node;
-            }
-
+            const workItemNode = extractWorkItemNode(node);
             if (workItemNode) {
                 await treeProvider?.openWorkItem(workItemNode);
             }
         })
     );
 
+    // ── Open Query in Browser ────────────────────────────────────────
+
     context.subscriptions.push(
         vscode.commands.registerCommand('adoQueries.openQueryInBrowser', (node?: QueryNode | AdoTreeItem) => {
-            let queryId: string | undefined;
-            let org: string | undefined;
-            let project: string | undefined;
-            
-            // Handle query node passed from context menu
-            if (node) {
-                if ('type' in node && node.type === 'query') {
-                    queryId = node.queryId;
-                    org = node.organization;
-                    project = node.project;
-                } else if ('node' in node && node.node !== 'configure' && node.node !== 'error' && 
-                           node.node !== 'loading' && node.node !== 'empty' && node.node.type === 'query') {
-                    queryId = node.node.queryId;
-                    org = node.node.organization;
-                    project = node.node.project;
-                }
+            const queryNode = extractQueryNode(node);
+            treeProvider?.openQueryInBrowser(
+                queryNode?.queryId,
+                queryNode?.organization,
+                queryNode?.project
+            );
+        })
+    );
+
+    // ── Copy Commands ────────────────────────────────────────────────
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('adoQueries.copyWorkItemId', async (node: WorkItemNode | AdoTreeItem) => {
+            const workItemNode = extractWorkItemNode(node);
+            if (workItemNode) {
+                await treeProvider?.copyWorkItemId(workItemNode);
             }
-            
-            treeProvider?.openQueryInBrowser(queryId, org, project);
         })
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('adoQueries.copyWorkItemId', async (node: WorkItemNode | AdoTreeItem) => {
-            let workItemNode: WorkItemNode | undefined;
-            
-            if ('type' in node && node.type === 'workItem') {
-                workItemNode = node;
-            } else if ('node' in node && node.node !== 'configure' && node.node !== 'error' && 
-                       node.node !== 'loading' && node.node !== 'empty' && node.node.type === 'workItem') {
-                workItemNode = node.node;
-            }
-
+        vscode.commands.registerCommand('adoQueries.copyWorkItemUrl', async (node: WorkItemNode | AdoTreeItem) => {
+            const workItemNode = extractWorkItemNode(node);
             if (workItemNode) {
-                await treeProvider?.copyWorkItemId(workItemNode);
+                await treeProvider?.copyWorkItemUrl(workItemNode);
             }
+        })
+    );
+
+    // ── Show Output Channel ──────────────────────────────────────────
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('adoQueries.showOutput', () => {
+            treeProvider?.showOutputChannel();
         })
     );
 
@@ -239,44 +311,64 @@ export function activate(context: vscode.ExtensionContext) {
     treeProvider.refresh();
 }
 
+// ─── Helper functions ────────────────────────────────────────────────
+
 /**
- * Parsed query URL info
+ * Determine the appropriate settings target (workspace if available, else global)
  */
-interface ParsedQueryUrl {
-    organization?: string;
-    project?: string;
-    queryId?: string;
+function getSettingsTarget(): vscode.ConfigurationTarget {
+    const workspaceFolders = vscode.workspace.workspaceFolders;
+    if (workspaceFolders && workspaceFolders.length > 0) {
+        // Check if there's already workspace-level config
+        const config = vscode.workspace.getConfiguration('adoQueries');
+        const inspect = config.inspect<QueryDefinition[]>('queries');
+        if (inspect?.workspaceValue !== undefined) {
+            return vscode.ConfigurationTarget.Workspace;
+        }
+    }
+    return vscode.ConfigurationTarget.Global;
 }
 
 /**
- * Extract query info from an ADO URL
- * Examples:
- * - https://dev.azure.com/org/project/_queries/query/12345678-1234-1234-1234-123456789012
- * - https://org.visualstudio.com/project/_queries/query/12345678-1234-1234-1234-123456789012
+ * Add a query to settings, using the appropriate scope
  */
-function extractQueryInfoFromUrl(text: string): ParsedQueryUrl {
-    // Pattern for dev.azure.com URLs
-    const devAzurePattern = /https?:\/\/dev\.azure\.com\/([^\/]+)\/([^\/]+)\/_queries\/query(?:-edit)?\/([0-9a-fA-F-]{36})/i;
-    // Pattern for org.visualstudio.com URLs
-    const vstsPattern = /https?:\/\/([^\.]+)\.visualstudio\.com\/([^\/]+)\/_queries\/query(?:-edit)?\/([0-9a-fA-F-]{36})/i;
+async function addQueryToSettings(newQuery: QueryDefinition): Promise<void> {
+    const config = vscode.workspace.getConfiguration('adoQueries');
+    const existingQueries = config.get<QueryDefinition[]>('queries') ?? [];
+    const updatedQueries = [...existingQueries, newQuery];
+    await config.update('queries', updatedQueries, getSettingsTarget());
+}
+
+/**
+ * Extract a QueryNode from various node types
+ */
+function extractQueryNode(node?: QueryNode | AdoTreeItem): QueryNode | undefined {
+    if (!node) return undefined;
     
-    let match = text.match(devAzurePattern);
-    if (match) {
-        return { organization: match[1], project: decodeURIComponent(match[2]), queryId: match[3] };
+    if ('type' in node && node.type === 'query') {
+        return node;
     }
-    
-    match = text.match(vstsPattern);
-    if (match) {
-        return { organization: match[1], project: decodeURIComponent(match[2]), queryId: match[3] };
+    if ('node' in node && node.node !== 'configure' && node.node !== 'error' && 
+        node.node !== 'loading' && node.node !== 'empty' && node.node.type === 'query') {
+        return node.node;
     }
-    
-    // Just a GUID
-    const guidPattern = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
-    if (guidPattern.test(text.trim())) {
-        return { queryId: text.trim() };
+    return undefined;
+}
+
+/**
+ * Extract a WorkItemNode from various node types
+ */
+function extractWorkItemNode(node?: WorkItemNode | AdoTreeItem): WorkItemNode | undefined {
+    if (!node) return undefined;
+
+    if ('type' in node && node.type === 'workItem') {
+        return node as WorkItemNode;
     }
-    
-    return {};
+    if ('node' in node && node.node !== 'configure' && node.node !== 'error' && 
+        node.node !== 'loading' && node.node !== 'empty' && node.node.type === 'workItem') {
+        return node.node;
+    }
+    return undefined;
 }
 
 /**
@@ -285,7 +377,6 @@ function extractQueryInfoFromUrl(text: string): ParsedQueryUrl {
 async function expandItemRecursively(item: AdoTreeItem): Promise<void> {
     if (!treeView || !treeProvider) return;
     
-    // Only expand if it has children
     const node = item.node;
     if (node === 'configure' || node === 'error' || node === 'loading' || node === 'empty') {
         return;
@@ -295,11 +386,9 @@ async function expandItemRecursively(item: AdoTreeItem): Promise<void> {
         return; // Leaf node, nothing to expand
     }
     
-    // Reveal this item with expand=true
     try {
         await treeView.reveal(item, { expand: true, select: false, focus: false });
         
-        // Get children and expand them too
         const children = await treeProvider.getChildren(item);
         for (const child of children) {
             await expandItemRecursively(child);

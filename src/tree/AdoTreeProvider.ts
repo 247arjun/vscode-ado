@@ -16,7 +16,7 @@ export class AdoTreeItem extends vscode.TreeItem {
         let collapsibleState: vscode.TreeItemCollapsibleState;
 
         if (node === 'configure') {
-            label = 'Configure queries in settings...';
+            label = 'Click to add a query...';
             collapsibleState = vscode.TreeItemCollapsibleState.None;
         } else if (node === 'error') {
             label = message ?? 'Error loading work items';
@@ -46,11 +46,11 @@ export class AdoTreeItem extends vscode.TreeItem {
 
         if (node === 'configure') {
             this.command = {
-                command: 'workbench.action.openSettings',
-                title: 'Configure Queries',
-                arguments: ['adoQueries.queries']
+                command: 'adoQueries.setQueryFromClipboard',
+                title: 'Add Query From Clipboard',
+                arguments: []
             };
-            this.iconPath = new vscode.ThemeIcon('gear');
+            this.iconPath = new vscode.ThemeIcon('add');
         } else if (node === 'error') {
             this.iconPath = new vscode.ThemeIcon('error');
         } else if (node === 'loading') {
@@ -144,11 +144,22 @@ export class AdoTreeProvider implements vscode.TreeDataProvider<AdoTreeItem> {
     private lastError: string | undefined;
     private refreshTimer: NodeJS.Timeout | undefined;
     private currentGeneration = 0;
+    private statusBarItem: vscode.StatusBarItem;
+    private lastRefreshTime: Date | undefined;
+    private totalWorkItemCount = 0;
+    private outputChannel: vscode.OutputChannel;
 
     constructor() {
         this.cliRunner = new AzCliRunner();
-        this.adoClient = new AdoClient(this.cliRunner);
+        this.outputChannel = vscode.window.createOutputChannel('Azure DevOps Queries');
+        this.adoClient = new AdoClient(this.cliRunner, this.outputChannel);
         this.groupingEngine = new GroupingEngine();
+        
+        // Create status bar item
+        this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
+        this.statusBarItem.command = 'adoQueries.refresh';
+        this.statusBarItem.tooltip = 'Click to refresh Azure DevOps queries';
+        this.updateStatusBar();
         
         // Setup auto-refresh if configured
         this.setupAutoRefresh();
@@ -177,8 +188,33 @@ export class AdoTreeProvider implements vscode.TreeDataProvider<AdoTreeItem> {
         }
     }
 
+    /**
+     * Update the status bar with current state
+     */
+    private updateStatusBar(): void {
+        if (!Settings.isConfigured()) {
+            this.statusBarItem.hide();
+            return;
+        }
+
+        if (this.isLoading) {
+            this.statusBarItem.text = '$(loading~spin) ADO: refreshing...';
+        } else if (this.lastRefreshTime) {
+            const timeStr = this.lastRefreshTime.toLocaleTimeString();
+            this.statusBarItem.text = `$(checklist) ADO: ${this.totalWorkItemCount} items (${timeStr})`;
+        } else {
+            this.statusBarItem.text = '$(checklist) ADO: not loaded';
+        }
+        
+        this.statusBarItem.show();
+    }
+
     getTreeItem(element: AdoTreeItem): vscode.TreeItem {
         return element;
+    }
+
+    getAdoClient(): AdoClient {
+        return this.adoClient;
     }
 
     async getChildren(element?: AdoTreeItem): Promise<AdoTreeItem[]> {
@@ -236,7 +272,7 @@ export class AdoTreeProvider implements vscode.TreeDataProvider<AdoTreeItem> {
     }
 
     /**
-     * Refresh the tree data
+     * Refresh the tree data (all queries in parallel)
      */
     async refresh(): Promise<void> {
         if (this.isLoading) {
@@ -255,28 +291,42 @@ export class AdoTreeProvider implements vscode.TreeDataProvider<AdoTreeItem> {
 
         this.isLoading = true;
         this.lastError = undefined;
+        this.updateStatusBar();
         this._onDidChangeTreeData.fire();
 
         try {
-            const queryNodes: QueryNode[] = [];
-
-            for (const queryDef of queries) {
-                // Check if this request is still relevant
-                if (generation !== this.currentGeneration) {
-                    return;
-                }
-
-                const queryNode = await this.loadQueryNode(queryDef);
-                queryNodes.push(queryNode);
-            }
+            // Load all queries in parallel
+            const queryPromises = queries.map(queryDef => this.loadQueryNode(queryDef));
+            const results = await Promise.allSettled(queryPromises);
 
             // Check if this request is still relevant
             if (generation !== this.currentGeneration) {
                 return;
             }
 
+            const queryNodes: QueryNode[] = results.map((result, index) => {
+                if (result.status === 'fulfilled') {
+                    return result.value;
+                }
+                // Handle rejected promise
+                return {
+                    type: 'query' as const,
+                    name: queries[index].name,
+                    organization: queries[index].organization,
+                    project: queries[index].project,
+                    queryId: queries[index].queryId,
+                    queryPath: queries[index].queryPath,
+                    count: 0,
+                    children: [],
+                    error: String(result.reason),
+                    collapsed: queries[index].collapsed
+                };
+            });
+
             this.cachedQueries = queryNodes;
-            console.log(`[ADO] Loaded ${queryNodes.length} queries`);
+            this.totalWorkItemCount = queryNodes.reduce((sum, q) => sum + q.count, 0);
+            this.lastRefreshTime = new Date();
+            this.outputChannel.appendLine(`[${new Date().toISOString()}] Loaded ${queryNodes.length} queries, ${this.totalWorkItemCount} total items`);
 
         } catch (err) {
             console.error('[ADO] Refresh error:', err);
@@ -286,9 +336,45 @@ export class AdoTreeProvider implements vscode.TreeDataProvider<AdoTreeItem> {
         } finally {
             if (generation === this.currentGeneration) {
                 this.isLoading = false;
+                this.updateStatusBar();
                 this._onDidChangeTreeData.fire();
             }
         }
+    }
+
+    /**
+     * Refresh a single query by index
+     */
+    async refreshSingleQuery(queryIndex: number): Promise<void> {
+        const queries = Settings.getActiveQueries();
+        if (queryIndex < 0 || queryIndex >= queries.length) {
+            return;
+        }
+
+        const queryDef = queries[queryIndex];
+        this.adoClient.clearCacheForQuery(queryDef);
+        
+        const queryNode = await this.loadQueryNode(queryDef);
+        
+        if (queryIndex < this.cachedQueries.length) {
+            this.cachedQueries[queryIndex] = queryNode;
+        }
+
+        this.totalWorkItemCount = this.cachedQueries.reduce((sum, q) => sum + q.count, 0);
+        this.lastRefreshTime = new Date();
+        this.updateStatusBar();
+        this._onDidChangeTreeData.fire();
+    }
+
+    /**
+     * Find the index of a query node in the cached queries
+     */
+    findQueryIndex(queryNode: QueryNode): number {
+        return this.cachedQueries.findIndex(q => 
+            q.name === queryNode.name && 
+            q.queryId === queryNode.queryId && 
+            q.queryPath === queryNode.queryPath
+        );
     }
 
     /**
@@ -316,8 +402,6 @@ export class AdoTreeProvider implements vscode.TreeDataProvider<AdoTreeItem> {
         const groupBy = queryDef.groupBy ?? Settings.groupBy;
         const children = this.groupingEngine.buildTree(workItems, groupBy);
         const count = this.countWorkItems(children);
-
-        console.log(`[ADO] Query "${queryDef.name}": ${workItems.length} items, ${children.length} groups`);
 
         return {
             type: 'query',
@@ -365,6 +449,13 @@ export class AdoTreeProvider implements vscode.TreeDataProvider<AdoTreeItem> {
     }
 
     /**
+     * Get the URL for a work item (for copying)
+     */
+    async getWorkItemUrl(node: WorkItemNode): Promise<string | undefined> {
+        return node.url ?? await this.adoClient.getWorkItemUrl(node.id);
+    }
+
+    /**
      * Open a query in browser
      */
     openQueryInBrowser(queryId?: string, org?: string, project?: string): void {
@@ -386,12 +477,32 @@ export class AdoTreeProvider implements vscode.TreeDataProvider<AdoTreeItem> {
     }
 
     /**
+     * Copy work item URL to clipboard
+     */
+    async copyWorkItemUrl(node: WorkItemNode): Promise<void> {
+        const url = await this.getWorkItemUrl(node);
+        if (url) {
+            await vscode.env.clipboard.writeText(url);
+            vscode.window.showInformationMessage(`Copied work item URL: #${node.id}`);
+        } else {
+            vscode.window.showWarningMessage('Could not determine work item URL');
+        }
+    }
+
+    /**
      * Clear cache and force refresh
      */
     forceRefresh(): void {
         this.adoClient.clearCache();
         this.cachedQueries = [];
         this.refresh();
+    }
+
+    /**
+     * Show the output channel
+     */
+    showOutputChannel(): void {
+        this.outputChannel.show();
     }
 
     /**
@@ -402,5 +513,7 @@ export class AdoTreeProvider implements vscode.TreeDataProvider<AdoTreeItem> {
             clearInterval(this.refreshTimer);
         }
         this._onDidChangeTreeData.dispose();
+        this.statusBarItem.dispose();
+        this.outputChannel.dispose();
     }
 }

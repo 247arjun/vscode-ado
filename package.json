@@ -2,8 +2,9 @@
   "name": "azure-devops-queries",
   "displayName": "Azure DevOps Queries",
   "description": "View Azure DevOps queries as a grouped tree in VS Code",
-  "version": "0.6.0",
-  "publisher": "your-publisher",
+  "version": "0.7.0",
+  "publisher": "ArjunGopalakrishna",
+  "icon": "media/icon.png",
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -20,7 +21,7 @@
         {
           "id": "adoQueries",
           "title": "Azure DevOps Queries",
-          "icon": "$(checklist)"
+          "icon": "media/icon.svg"
         }
       ]
     },
@@ -32,6 +33,12 @@
         }
       ]
     },
+    "viewsWelcome": [
+      {
+        "view": "adoQueries.results",
+        "contents": "No Azure DevOps queries configured.\n[Add Query from Clipboard](command:adoQueries.setQueryFromClipboard)\n[Add Query Manually](command:adoQueries.setQueryManual)\nCopy a query URL from Azure DevOps, then click \"Add Query from Clipboard\" to get started.\n[Learn More](command:adoQueries.showOutput)"
+      }
+    ],
     "commands": [
       {
         "command": "adoQueries.setQueryFromClipboard",
@@ -51,22 +58,51 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "adoQueries.refreshQuery",
+        "title": "Refresh This Query",
+        "icon": "$(refresh)"
+      },
+      {
         "command": "adoQueries.openWorkItem",
         "title": "Open in Browser",
         "icon": "$(link-external)"
       },
       {
         "command": "adoQueries.openQueryInBrowser",
-        "title": "Azure DevOps: Open Query in Browser"
+        "title": "Open Query in Browser"
       },
       {
         "command": "adoQueries.copyWorkItemId",
         "title": "Copy Work Item ID"
       },
       {
+        "command": "adoQueries.copyWorkItemUrl",
+        "title": "Copy Work Item URL"
+      },
+      {
         "command": "adoQueries.expandAll",
         "title": "Expand All",
         "icon": "$(expand-all)"
+      },
+      {
+        "command": "adoQueries.removeQuery",
+        "title": "Remove Query"
+      },
+      {
+        "command": "adoQueries.renameQuery",
+        "title": "Rename Query"
+      },
+      {
+        "command": "adoQueries.showOutput",
+        "title": "Azure DevOps: Show Output Log"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "adoQueries.refresh",
+        "key": "ctrl+shift+r",
+        "mac": "cmd+shift+r",
+        "when": "view.adoQueries.results.visible"
       }
     ],
     "menus": {
@@ -88,6 +124,10 @@
         {
           "command": "adoQueries.setGroupBy",
           "when": "view == adoQueries.results"
+        },
+        {
+          "command": "adoQueries.showOutput",
+          "when": "view == adoQueries.results"
         }
       ],
       "view/item/context": [
@@ -97,12 +137,34 @@
           "group": "inline"
         },
         {
+          "command": "adoQueries.refreshQuery",
+          "when": "view == adoQueries.results && viewItem == query",
+          "group": "inline"
+        },
+        {
           "command": "adoQueries.copyWorkItemId",
-          "when": "view == adoQueries.results && viewItem == workItem"
+          "when": "view == adoQueries.results && viewItem == workItem",
+          "group": "1_copy"
+        },
+        {
+          "command": "adoQueries.copyWorkItemUrl",
+          "when": "view == adoQueries.results && viewItem == workItem",
+          "group": "1_copy"
         },
         {
           "command": "adoQueries.openQueryInBrowser",
-          "when": "view == adoQueries.results && viewItem == query"
+          "when": "view == adoQueries.results && viewItem == query",
+          "group": "2_query"
+        },
+        {
+          "command": "adoQueries.renameQuery",
+          "when": "view == adoQueries.results && viewItem == query",
+          "group": "3_manage"
+        },
+        {
+          "command": "adoQueries.removeQuery",
+          "when": "view == adoQueries.results && viewItem == query",
+          "group": "3_manage"
         }
       ]
     },
@@ -127,6 +189,7 @@
         "adoQueries.queries": {
           "type": "array",
           "default": [],
+          "scope": "resource",
           "description": "Array of query definitions. Each query appears as a top-level node in the tree.",
           "items": {
             "type": "object",
@@ -237,11 +300,17 @@
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./"
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTests.js"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
     "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "eslint": "^8.56.0",
+    "prettier": "^3.2.0",
     "typescript": "^5.3.0"
   }
 }

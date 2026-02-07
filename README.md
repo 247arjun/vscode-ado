@@ -161,7 +161,24 @@ Customize how work items are grouped:
 | `Azure DevOps: Add Query` | Manually enter query ID or path |
 | `Azure DevOps: Configure Grouping` | Open group-by settings |
 | `Azure DevOps: Refresh Queries` | Refresh all queries |
-| `Azure DevOps: Open Query in Browser` | Open the query in Azure DevOps web |
+| `Azure DevOps: Show Output Log` | Show diagnostics output channel |
+| `Refresh This Query` | Refresh a single query (context menu) |
+| `Remove Query` | Remove a query from settings (context menu) |
+| `Rename Query` | Rename a query display name (context menu) |
+| `Copy Work Item URL` | Copy work item ADO link to clipboard (context menu) |
+| `Open in Browser` | Open work item in Azure DevOps (context menu) |
+| `Open Query in Browser` | Open the query in Azure DevOps web (context menu) |
+| `Copy Work Item ID` | Copy ID to clipboard (context menu) |
+
+### Keyboard Shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| `Cmd+Shift+R` (macOS) / `Ctrl+Shift+R` (Windows/Linux) | Refresh all queries |
+
+### Status Bar
+
+The status bar shows the total work item count across all queries and the time of last refresh.
 
 ## Usage
 
@@ -185,6 +202,10 @@ Make sure Azure CLI is installed and in your PATH. Restart VS Code after install
 ### "Not authenticated"
 
 Run `az login` or `az devops login` in your terminal.
+
+### Check the Output Log
+
+Run `Azure DevOps: Show Output Log` to view detailed diagnostics, including API calls, errors, and timing information.
 
 ### "Query must be a flat list query"
 

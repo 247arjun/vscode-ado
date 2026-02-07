@@ -2,6 +2,36 @@
 
 All notable changes to the "Azure DevOps Queries" extension will be documented in this file.
 
+## [0.7.0] - 2026-02-03
+
+### Added
+
+- **Batch fetch fix**: Work items are now fetched via `az devops invoke` with a proper POST body, dramatically improving performance for large queries
+- **Parallel query loading**: Multiple queries load concurrently using `Promise.allSettled`
+- **Per-query refresh**: Right-click a query node → "Refresh This Query" to reload just that query
+- **Remove Query**: Right-click a query node → "Remove Query" to delete it from settings
+- **Rename Query**: Right-click a query node → "Rename Query" to update its display name
+- **Copy Work Item URL**: Right-click a work item → "Copy Work Item URL" to copy the ADO link
+- **Output channel**: "Azure DevOps: Show Output Log" command for diagnostics and troubleshooting
+- **Welcome view**: Helpful onboarding buttons when no queries are configured
+- **Status bar item**: Shows total work item count and last refresh time
+- **Auto-fetch query name**: When adding from clipboard, the query name is fetched from ADO automatically
+- **Keyboard shortcut**: `Cmd+Shift+R` (macOS) / `Ctrl+Shift+R` (Windows/Linux) to refresh all queries
+- **Custom extension icon**: Activity bar and marketplace icons
+- **Unit tests**: GroupingEngine and URL parsing test suites with a standalone test runner
+- **ESLint + Prettier**: Code quality tooling with TypeScript-specific rules
+- **Workspace-scoped settings**: `adoQueries.queries` setting supports workspace-level configuration
+
+### Changed
+
+- Publisher set to `ArjunGopalakrishna`
+- Context menu items organized into groups (Copy, Query, Manage)
+- URL parsing extracted to `src/utils/urlParser.ts` for testability
+
+### Removed
+
+- `spec.md` removed from repository
+
 ## [0.6.0] - 2026-02-02
 
 ### Changed

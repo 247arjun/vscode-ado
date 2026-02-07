@@ -8,4 +8,10 @@ vsc-extension-quickstart.md
 **/.eslintrc.json
 **/*.map
 **/*.ts
+!media/**
 node_modules/**
+spec.md
+releases/**
+.DS_Store
+.prettierrc
+.eslintrc.json
