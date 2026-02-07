@@ -2,6 +2,12 @@
 
 All notable changes to the "Azure DevOps Queries" extension will be documented in this file.
 
+## [0.8.0] - 2026-02-06
+
+### Fixed
+
+- Queries now load sequentially instead of in parallel to avoid "Too many concurrent CLI processes" errors when multiple queries are configured
+
 ## [0.7.0] - 2026-02-03
 
 ### Added

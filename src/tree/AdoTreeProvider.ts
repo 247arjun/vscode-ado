@@ -272,7 +272,7 @@ export class AdoTreeProvider implements vscode.TreeDataProvider<AdoTreeItem> {
     }
 
     /**
-     * Refresh the tree data (all queries in parallel)
+     * Refresh the tree data (queries loaded sequentially to avoid CLI concurrency limits)
      */
     async refresh(): Promise<void> {
         if (this.isLoading) {
@@ -295,33 +295,37 @@ export class AdoTreeProvider implements vscode.TreeDataProvider<AdoTreeItem> {
         this._onDidChangeTreeData.fire();
 
         try {
-            // Load all queries in parallel
-            const queryPromises = queries.map(queryDef => this.loadQueryNode(queryDef));
-            const results = await Promise.allSettled(queryPromises);
+            // Load queries sequentially to avoid overwhelming the Azure CLI
+            // (each query spawns multiple CLI processes for query + batch fetches)
+            const queryNodes: QueryNode[] = [];
+            for (const queryDef of queries) {
+                // Check if this request is still relevant
+                if (generation !== this.currentGeneration) {
+                    return;
+                }
+                try {
+                    const node = await this.loadQueryNode(queryDef);
+                    queryNodes.push(node);
+                } catch (err) {
+                    queryNodes.push({
+                        type: 'query' as const,
+                        name: queryDef.name,
+                        organization: queryDef.organization,
+                        project: queryDef.project,
+                        queryId: queryDef.queryId,
+                        queryPath: queryDef.queryPath,
+                        count: 0,
+                        children: [],
+                        error: String(err),
+                        collapsed: queryDef.collapsed
+                    });
+                }
+            }
 
             // Check if this request is still relevant
             if (generation !== this.currentGeneration) {
                 return;
             }
-
-            const queryNodes: QueryNode[] = results.map((result, index) => {
-                if (result.status === 'fulfilled') {
-                    return result.value;
-                }
-                // Handle rejected promise
-                return {
-                    type: 'query' as const,
-                    name: queries[index].name,
-                    organization: queries[index].organization,
-                    project: queries[index].project,
-                    queryId: queries[index].queryId,
-                    queryPath: queries[index].queryPath,
-                    count: 0,
-                    children: [],
-                    error: String(result.reason),
-                    collapsed: queries[index].collapsed
-                };
-            });
 
             this.cachedQueries = queryNodes;
             this.totalWorkItemCount = queryNodes.reduce((sum, q) => sum + q.count, 0);
