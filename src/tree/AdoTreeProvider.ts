@@ -494,6 +494,33 @@ export class AdoTreeProvider implements vscode.TreeDataProvider<AdoTreeItem> {
     }
 
     /**
+     * Find the parent QueryNode for a given work item ID
+     */
+    findParentQuery(workItemId: number): QueryNode | undefined {
+        for (const query of this.cachedQueries) {
+            if (this.containsWorkItem(query.children, workItemId)) {
+                return query;
+            }
+        }
+        return undefined;
+    }
+
+    /**
+     * Check if a tree node array contains a work item with the given ID
+     */
+    private containsWorkItem(nodes: TreeNode[], workItemId: number): boolean {
+        for (const node of nodes) {
+            if (node.type === 'workItem' && node.id === workItemId) {
+                return true;
+            }
+            if ((node.type === 'group' || node.type === 'query') && this.containsWorkItem(node.children, workItemId)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * Clear cache and force refresh
      */
     forceRefresh(): void {

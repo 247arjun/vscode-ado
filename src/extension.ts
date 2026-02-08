@@ -307,6 +307,95 @@ export function activate(context: vscode.ExtensionContext) {
         })
     );
 
+    // ── Change State ─────────────────────────────────────────────────
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('adoQueries.changeState', async (node?: WorkItemNode | AdoTreeItem) => {
+            if (!treeProvider) return;
+
+            const workItemNode = extractWorkItemNode(node);
+            if (!workItemNode) return;
+
+            const adoClient = treeProvider.getAdoClient();
+
+            // Find the parent query to get org/project context
+            const parentQuery = treeProvider.findParentQuery(workItemNode.id);
+            const org = parentQuery?.organization;
+            const project = parentQuery?.project;
+
+            // Get the work item type – required to look up valid states
+            const witType = workItemNode.workItemType;
+            if (!witType) {
+                vscode.window.showWarningMessage('Work item type is unknown — cannot determine valid states.');
+                return;
+            }
+
+            // Fetch valid states for this work item type
+            const states = await vscode.window.withProgress(
+                { location: vscode.ProgressLocation.Notification, title: 'Loading states...' },
+                () => adoClient.fetchWorkItemTypeStates(witType, org, project)
+            );
+
+            if (states.length === 0) {
+                vscode.window.showWarningMessage(`Could not fetch states for type "${witType}".`);
+                return;
+            }
+
+            // Build QuickPick items, excluding the current state
+            const currentState = workItemNode.state;
+            const items = states
+                .filter(s => s.name !== currentState)
+                .map(s => ({
+                    label: s.name,
+                    description: s.category ?? ''
+                }));
+
+            if (items.length === 0) {
+                vscode.window.showInformationMessage(`No other states available for "${witType}".`);
+                return;
+            }
+
+            const picked = await vscode.window.showQuickPick(items, {
+                placeHolder: `Change #${workItemNode.id} from "${currentState}" to...`,
+                title: `Change State — #${workItemNode.id} ${workItemNode.title}`
+            });
+
+            if (!picked) return;
+
+            // Build a QueryDefinition for connection args
+            const queryDef: QueryDefinition | undefined = parentQuery
+                ? { name: parentQuery.name, queryId: parentQuery.queryId, queryPath: parentQuery.queryPath, organization: org, project }
+                : undefined;
+
+            // Update the work item
+            const result = await vscode.window.withProgress(
+                { location: vscode.ProgressLocation.Notification, title: `Updating #${workItemNode.id}...` },
+                () => adoClient.updateWorkItemState(workItemNode.id, picked.label, queryDef)
+            );
+
+            if (result.success) {
+                vscode.window.showInformationMessage(`#${workItemNode.id} → ${picked.label}`);
+
+                // Refresh the parent query to reflect the change
+                if (parentQuery) {
+                    const index = treeProvider.findQueryIndex(parentQuery);
+                    if (index >= 0) {
+                        adoClient.clearCacheForQuery({
+                            name: parentQuery.name,
+                            queryId: parentQuery.queryId,
+                            queryPath: parentQuery.queryPath,
+                            organization: org,
+                            project
+                        });
+                        await treeProvider.refreshSingleQuery(index);
+                    }
+                }
+            } else {
+                vscode.window.showErrorMessage(`Failed to update state: ${result.error?.message}`);
+            }
+        })
+    );
+
     // Initial refresh
     treeProvider.refresh();
 }

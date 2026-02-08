@@ -46,9 +46,19 @@ export interface QueryMetadata {
 /**
  * ADO client that uses Azure CLI for API calls
  */
+/**
+ * State transition info for a work item type
+ */
+export interface WorkItemTypeState {
+    name: string;
+    color: string;
+    category: string;
+}
+
 export class AdoClient {
     private cliRunner: AzCliRunner;
     private cache: Map<string, { data: WorkItem[]; timestamp: number }> = new Map();
+    private stateCache: Map<string, WorkItemTypeState[]> = new Map();
     private outputChannel: vscode.OutputChannel;
 
     constructor(cliRunner?: AzCliRunner, outputChannel?: vscode.OutputChannel) {
@@ -469,6 +479,89 @@ export class AdoClient {
      */
     getOutputChannel(): vscode.OutputChannel {
         return this.outputChannel;
+    }
+
+    /**
+     * Fetch valid states for a work item type.
+     * Results are cached for the session (states rarely change).
+     */
+    async fetchWorkItemTypeStates(
+        workItemType: string,
+        org?: string,
+        project?: string
+    ): Promise<WorkItemTypeState[]> {
+        const effectiveOrg = org ?? Settings.organization;
+        const effectiveProject = project ?? Settings.project;
+        const cacheKey = `${effectiveOrg}/${effectiveProject}/${workItemType}`;
+
+        const cached = this.stateCache.get(cacheKey);
+        if (cached) {
+            this.log(`State cache hit for "${workItemType}"`);
+            return cached;
+        }
+
+        this.log(`Fetching states for work item type "${workItemType}"`);
+
+        const args = [
+            'boards', 'work-item-type', 'show',
+            '--type', workItemType
+        ];
+
+        if (effectiveOrg) {
+            args.push('--org', this.normalizeOrgUrl(effectiveOrg));
+        }
+        if (effectiveProject) {
+            args.push('--project', effectiveProject);
+        }
+        if (Settings.detectFromGit && !effectiveOrg) {
+            args.push('--detect', 'true');
+        }
+
+        interface WitTypeResponse {
+            states: WorkItemTypeState[];
+            transitions: Record<string, { to: string }[]>;
+        }
+
+        const result = await this.cliRunner.execute<WitTypeResponse>(args);
+
+        if (result.success && result.data?.states) {
+            const states = result.data.states;
+            this.stateCache.set(cacheKey, states);
+            this.log(`Found ${states.length} states for "${workItemType}": ${states.map(s => s.name).join(', ')}`);
+            return states;
+        }
+
+        this.log(`Failed to fetch states for "${workItemType}": ${result.error?.message}`);
+        return [];
+    }
+
+    /**
+     * Update a work item's state
+     */
+    async updateWorkItemState(
+        id: number,
+        newState: string,
+        queryDef?: QueryDefinition
+    ): Promise<CliResult<WorkItem>> {
+        this.log(`Updating work item #${id} state to "${newState}"`);
+
+        const args = [
+            'boards', 'work-item', 'update',
+            '--id', id.toString(),
+            '--state', newState
+        ];
+
+        args.push(...(queryDef ? this.getConnectionArgsForQuery(queryDef) : this.getConnectionArgs()));
+
+        const result = await this.cliRunner.execute<WorkItem>(args);
+
+        if (result.success) {
+            this.log(`Successfully updated #${id} to "${newState}"`);
+        } else {
+            this.log(`Failed to update #${id}: ${result.error?.message}`);
+        }
+
+        return result;
     }
 
     /**

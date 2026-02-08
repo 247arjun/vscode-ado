@@ -2,7 +2,7 @@
   "name": "azure-devops-queries",
   "displayName": "Azure DevOps Queries",
   "description": "View Azure DevOps queries as a grouped tree in VS Code",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "publisher": "ArjunGopalakrishna",
   "icon": "media/icon.png",
   "engines": {
@@ -93,6 +93,10 @@
         "title": "Rename Query"
       },
       {
+        "command": "adoQueries.changeState",
+        "title": "Change State"
+      },
+      {
         "command": "adoQueries.showOutput",
         "title": "Azure DevOps: Show Output Log"
       }
@@ -150,6 +154,11 @@
           "command": "adoQueries.copyWorkItemUrl",
           "when": "view == adoQueries.results && viewItem == workItem",
           "group": "1_copy"
+        },
+        {
+          "command": "adoQueries.changeState",
+          "when": "view == adoQueries.results && viewItem == workItem",
+          "group": "2_actions"
         },
         {
           "command": "adoQueries.openQueryInBrowser",

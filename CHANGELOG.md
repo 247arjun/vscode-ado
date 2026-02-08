@@ -2,6 +2,16 @@
 
 All notable changes to the "Azure DevOps Queries" extension will be documented in this file.
 
+## [0.9.0] - 2026-02-07
+
+### Added
+
+- **Change State**: Right-click a work item → "Change State" to update its state directly from VS Code
+  - Dynamically fetches valid states for each work item type from ADO
+  - States are session-cached (first use per type pays the lookup cost, subsequent uses are instant)
+  - Automatically refreshes the parent query after a successful update
+  - Uses `az boards work-item update` under the hood
+
 ## [0.8.0] - 2026-02-06
 
 ### Fixed
