@@ -3,6 +3,7 @@ import { AdoClient, WorkItem } from '../ado/AdoClient';
 import { AzCliRunner } from '../ado/AzCliRunner';
 import { GroupingEngine, TreeNode, GroupNode, WorkItemNode, QueryNode } from '../grouping/GroupingEngine';
 import { Settings, QueryDefinition } from '../config/Settings';
+import { DataStore, LiveDataStore } from '../data/DataStore';
 
 /**
  * Tree item for display in VS Code
@@ -137,6 +138,7 @@ export class AdoTreeProvider implements vscode.TreeDataProvider<AdoTreeItem> {
 
     private cliRunner: AzCliRunner;
     private adoClient: AdoClient;
+    private dataStore: DataStore;
     private groupingEngine: GroupingEngine;
     
     private cachedQueries: QueryNode[] = [];
@@ -149,10 +151,13 @@ export class AdoTreeProvider implements vscode.TreeDataProvider<AdoTreeItem> {
     private totalWorkItemCount = 0;
     private outputChannel: vscode.OutputChannel;
 
-    constructor() {
+    constructor(dataStore?: DataStore) {
         this.cliRunner = new AzCliRunner();
         this.outputChannel = vscode.window.createOutputChannel('Azure DevOps Queries');
         this.adoClient = new AdoClient(this.cliRunner, this.outputChannel);
+        // Read through the DataStore seam; defaults to a live pass-through over
+        // AdoClient, but later phases inject a database-backed store here.
+        this.dataStore = dataStore ?? new LiveDataStore(this.adoClient);
         this.groupingEngine = new GroupingEngine();
         
         // Create status bar item
@@ -351,7 +356,7 @@ export class AdoTreeProvider implements vscode.TreeDataProvider<AdoTreeItem> {
         }
 
         const queryDef = queries[queryIndex];
-        this.adoClient.clearCacheForQuery(queryDef);
+        this.dataStore.clearCacheForQuery(queryDef);
         
         const queryNode = await this.loadQueryNode(queryDef);
         
@@ -380,7 +385,7 @@ export class AdoTreeProvider implements vscode.TreeDataProvider<AdoTreeItem> {
      * Load a single query and build its tree
      */
     private async loadQueryNode(queryDef: QueryDefinition): Promise<QueryNode> {
-        const result = await this.adoClient.getWorkItemsForQuery(queryDef);
+        const result = await this.dataStore.getWorkItemsForQuery(queryDef);
 
         if (!result.success) {
             return {
@@ -437,7 +442,7 @@ export class AdoTreeProvider implements vscode.TreeDataProvider<AdoTreeItem> {
         let url = node.url;
         
         if (!url) {
-            url = await this.adoClient.getWorkItemUrl(node.id);
+            url = await this.dataStore.getWorkItemUrl(node.id);
         }
         
         if (url) {
@@ -451,14 +456,14 @@ export class AdoTreeProvider implements vscode.TreeDataProvider<AdoTreeItem> {
      * Get the URL for a work item (for copying)
      */
     async getWorkItemUrl(node: WorkItemNode): Promise<string | undefined> {
-        return node.url ?? await this.adoClient.getWorkItemUrl(node.id);
+        return node.url ?? await this.dataStore.getWorkItemUrl(node.id);
     }
 
     /**
      * Open a query in browser
      */
     openQueryInBrowser(queryId?: string, org?: string, project?: string): void {
-        const url = this.adoClient.getQueryUrl(queryId, org, project);
+        const url = this.dataStore.getQueryUrl(queryId, org, project);
         
         if (url) {
             vscode.env.openExternal(vscode.Uri.parse(url));
