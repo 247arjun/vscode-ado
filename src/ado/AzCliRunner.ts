@@ -36,7 +36,7 @@ export class AzCliRunner {
     private activeProcesses: Map<string, ActiveProcess> = new Map();
     private currentGeneration = 0;
     private concurrentProcesses = 0;
-    private readonly maxConcurrent = 2;
+    private readonly maxConcurrent = 6;
 
     /**
      * Execute an az command and parse JSON output
