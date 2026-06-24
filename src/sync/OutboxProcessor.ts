@@ -1,7 +1,7 @@
 import { AdoRestClient, JsonPatchOp } from '../ado/AdoRestClient';
 import { Database } from '../db/Database';
 import { SyncQueueRepository } from '../db/repositories/SyncQueueRepository';
-import { WorkItemRepository } from '../db/repositories/WorkItemRepository';
+import { WorkItemRepository, workItemRowFromAdo } from '../db/repositories/WorkItemRepository';
 import { TaskRepository } from '../db/repositories/TaskRepository';
 import { SyncStateRepository } from '../db/repositories/SyncStateRepository';
 import { ConflictResolver } from './ConflictResolver';
@@ -49,6 +49,16 @@ export class OutboxProcessor {
         });
     }
 
+    /** Enqueue creation of a brand-new ADO work item from a local task. */
+    enqueueCreate(taskUuid: string, type: string, org: string, project: string, title: string): void {
+        this.queue.enqueue({
+            entity: 'task',
+            targetId: taskUuid,
+            opType: 'create_work_item',
+            payload: { type, org, project, title }
+        });
+    }
+
     /** Process all pending ops once. Safe to call repeatedly; re-entrancy-guarded. */
     async process(): Promise<void> {
         if (this.running) return;
@@ -64,6 +74,10 @@ export class OutboxProcessor {
     }
 
     private async processOne(op: SyncOp): Promise<void> {
+        if (op.opType === 'create_work_item') {
+            await this.processCreate(op);
+            return;
+        }
         if (op.opType !== 'update_state') {
             // Unknown op types are skipped for now.
             this.queue.setStatus(op.opId, 'failed', `Unsupported op type ${op.opType}`);
@@ -131,6 +145,53 @@ export class OutboxProcessor {
         } else {
             this.queue.setStatus(op.opId, 'pending', result.error?.message);
             this.log(`Transient failure on #${adoId} (attempt ${attempts}): ${result.error?.message}`);
+        }
+    }
+
+    /** Create a new ADO work item for a local task and link them together. */
+    private async processCreate(op: SyncOp): Promise<void> {
+        const taskUuid = op.targetId;
+        const task = this.tasks.getByUuid(taskUuid);
+        if (!task) {
+            this.queue.setStatus(op.opId, 'failed', 'Local task no longer exists');
+            return;
+        }
+        if (task.adoId !== undefined) {
+            // Already linked (e.g. a duplicate op) — nothing to do.
+            this.queue.setStatus(op.opId, 'done');
+            return;
+        }
+
+        const type = String(op.payload['type']);
+        const org = String(op.payload['org']);
+        const project = String(op.payload['project']);
+        const title = String(op.payload['title'] ?? task.title);
+        if (!org || !project) {
+            this.queue.setStatus(op.opId, 'failed', 'Missing org/project for new work item');
+            return;
+        }
+
+        this.queue.setStatus(op.opId, 'inflight');
+        const result = await this.rest.createWorkItem(org, project, type, { 'System.Title': title });
+
+        if (result.success && result.workItem) {
+            const newId = result.workItem.id;
+            const fields = result.workItem.fields ?? { 'System.Title': title };
+            this.workItems.upsert(workItemRowFromAdo(newId, fields, result.rev ?? 0, org, project, result.etag));
+            // Link the local task to its new ADO work item.
+            this.tasks.update(taskUuid, { adoId: newId });
+            this.queue.setStatus(op.opId, 'done');
+            this.log(`Created ADO ${type} #${newId} from local task "${title}"`);
+            return;
+        }
+
+        const attempts = this.queue.incrementAttempts(op.opId);
+        if (attempts >= MAX_ATTEMPTS) {
+            this.queue.setStatus(op.opId, 'failed', result.error?.message ?? 'Unknown error');
+            this.log(`Giving up creating work item for "${title}" after ${attempts} attempts: ${result.error?.message}`);
+        } else {
+            this.queue.setStatus(op.opId, 'pending', result.error?.message);
+            this.log(`Transient failure creating "${title}" (attempt ${attempts}): ${result.error?.message}`);
         }
     }
 }

@@ -116,6 +116,12 @@
                 state.title = 'Change state';
                 state.addEventListener('click', (e) => { e.stopPropagation(); send({ type: 'changeState', uuid: task.uuid }); });
                 actions.appendChild(state);
+            } else {
+                // Local-only task: offer to push it to Azure DevOps.
+                const push = el('button', 'action-btn', '↑ADO');
+                push.title = 'Push to Azure DevOps (create work item)';
+                push.addEventListener('click', (e) => { e.stopPropagation(); send({ type: 'pushToAdo', uuid: task.uuid }); });
+                actions.appendChild(push);
             }
         }
         row.appendChild(actions);

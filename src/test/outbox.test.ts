@@ -113,6 +113,30 @@ export async function runTests(): Promise<void> {
         assert.strictEqual(proc.pendingCount, 1, 'op should remain pending for retry');
     });
 
+    await test('create_work_item op creates and links a new ADO work item', async () => {
+        const db = await Database.openInMemory();
+        const tasks = new TaskRepository(db);
+        const local = tasks.createLocal('Follow-up with Sana');
+        assert.strictEqual(local.adoId, undefined);
+
+        const rest = {
+            async createWorkItem(_o: string, _p: string, _type: string, fields: Record<string, unknown>) {
+                return { success: true, workItem: { id: 9001, fields: { 'System.Title': fields['System.Title'], 'System.State': 'New', 'System.WorkItemType': 'Task' } } as any, etag: 'e1', rev: 1 } as PatchResult;
+            },
+            async patchWorkItem() { return { success: true } as PatchResult; },
+            async getWorkItem() { return undefined; }
+        };
+        const resolver = new ConflictResolver(rest as unknown as AdoRestClient, new WorkItemRepository(db), async () => 'theirs', () => {});
+        const proc = new OutboxProcessor(db, rest as unknown as AdoRestClient, resolver, () => {});
+        proc.enqueueCreate(local.uuid, 'Task', 'org', 'proj', local.title);
+        await proc.process();
+
+        const linked = tasks.getByUuid(local.uuid)!;
+        assert.strictEqual(linked.adoId, 9001, 'task should be linked to the new work item');
+        assert.strictEqual(proc.pendingCount, 0);
+        assert.ok(new WorkItemRepository(db).getById(9001), 'work item mirror row should exist');
+    });
+
     await test('soak: many ops with intermittent throttling eventually drain', async () => {
         const db = await Database.openInMemory();
         const wiRepo = new WorkItemRepository(db);

@@ -147,4 +147,42 @@ export class AdoRestClient {
         const workItem = (await res.json()) as WorkItem & { rev?: number };
         return { success: true, workItem, etag: res.headers.get('etag') ?? undefined, rev: workItem.rev };
     }
+
+    /**
+     * Create a new work item of `type` (e.g. "Task", "Bug") with the given
+     * fields. Returns the new item (including its server-assigned id) on success.
+     */
+    async createWorkItem(
+        org: string,
+        project: string,
+        type: string,
+        fields: Record<string, unknown>
+    ): Promise<PatchResult> {
+        const headers = await this.headers({ 'Content-Type': 'application/json-patch+json' });
+        if (!headers) {
+            return { success: false, error: { status: 401, message: 'Not authenticated' } };
+        }
+        const ops: JsonPatchOp[] = Object.entries(fields)
+            .filter(([, v]) => v !== undefined && v !== null && v !== '')
+            .map(([path, value]) => ({ op: 'add', path: `/fields/${path}`, value }));
+
+        const url = `${this.baseUrl(org, project)}/wit/workitems/$${encodeURIComponent(type)}?api-version=${this.apiVersion}`;
+        const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(ops) });
+
+        if (res.status === 429) {
+            return { success: false, error: { status: 429, message: 'Throttled' } };
+        }
+        if (!res.ok) {
+            let detail = `HTTP ${res.status}`;
+            try {
+                const body = (await res.json()) as { message?: string };
+                if (body.message) detail = body.message;
+            } catch {
+                /* ignore */
+            }
+            return { success: false, error: { status: res.status, message: detail } };
+        }
+        const workItem = (await res.json()) as WorkItem & { rev?: number };
+        return { success: true, workItem, etag: res.headers.get('etag') ?? undefined, rev: workItem.rev };
+    }
 }

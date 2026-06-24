@@ -146,6 +146,10 @@
       {
         "command": "adoThings.resetDatabase",
         "title": "ADO Things: Reset Local Database"
+      },
+      {
+        "command": "adoThings.pushToAdo",
+        "title": "ADO Things: Push Task to Azure DevOps"
       }
     ],
     "keybindings": [

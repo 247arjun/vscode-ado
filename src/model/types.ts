@@ -91,7 +91,7 @@ export interface SavedView {
     sort?: unknown;
 }
 
-export type SyncOpType = 'update_state' | 'update_fields' | 'link';
+export type SyncOpType = 'update_state' | 'update_fields' | 'link' | 'create_work_item';
 export type SyncOpStatus = 'pending' | 'inflight' | 'failed' | 'done';
 
 /** The outbox — local changes waiting to be pushed to ADO. */

@@ -20,6 +20,8 @@ export interface WorkbenchCallbacks {
     onChangeState(uuid: string): Promise<void> | void;
     /** User asked to open a work item in the browser. */
     onOpenWorkItem(adoId: number): void;
+    /** User asked to push a local-only task to ADO as a new work item. */
+    onPushToAdo(uuid: string): Promise<void> | void;
     /** Something changed; refresh the navigator counts. */
     onDataChanged(): void;
 }
@@ -133,6 +135,10 @@ export class WorkbenchHost {
             }
             case 'changeState':
                 await this.callbacks.onChangeState(msg.uuid);
+                this.afterMutation();
+                break;
+            case 'pushToAdo':
+                await this.callbacks.onPushToAdo(msg.uuid);
                 this.afterMutation();
                 break;
             case 'openWorkItem':

@@ -64,6 +64,7 @@ export type WebviewToHost =
     | { type: 'createTask'; title: string; view: ViewId }
     | { type: 'openWorkItem'; adoId: number }
     | { type: 'changeState'; uuid: string }
+    | { type: 'pushToAdo'; uuid: string }
     | { type: 'search'; query: string };
 
 /** Host -> Webview */

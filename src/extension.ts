@@ -123,6 +123,7 @@ export async function activate(context: vscode.ExtensionContext) {
             const url = await dataStore?.getWorkItemUrl(adoId);
             if (url) { void vscode.env.openExternal(vscode.Uri.parse(url)); }
         },
+        onPushToAdo: (uuid) => pushTaskToAdo(uuid),
         onDataChanged: () => navigatorProvider?.refresh()
     }, tagRepo, undoStack);
     context.subscriptions.push({ dispose: () => workbench?.dispose() });
@@ -158,6 +159,62 @@ export async function activate(context: vscode.ExtensionContext) {
         });
         if (!picked) return;
         await syncEngine?.enqueueStateChange(task.adoId, picked.label);
+    };
+
+    // Push a local-only task up to ADO as a brand-new work item.
+    const pushTaskToAdo = async (uuid: string): Promise<void> => {
+        const task = taskRepo.getByUuid(uuid);
+        if (!task) return;
+        if (task.adoId !== undefined) {
+            vscode.window.showInformationMessage(`This task is already linked to Azure DevOps work item #${task.adoId}.`);
+            return;
+        }
+
+        // Sign-in is required to create a work item.
+        const signedIn = (await tokenProvider?.isSignedIn()) ?? false;
+        if (!signedIn) {
+            const choice = await vscode.window.showWarningMessage('Sign in to Azure DevOps to push this task.', 'Sign In');
+            if (choice === 'Sign In') {
+                const ok = await tokenProvider?.signIn();
+                if (!ok) return;
+            } else {
+                return;
+            }
+        }
+
+        // Resolve org/project: prefer a configured query's, fall back to globals, else prompt.
+        const firstQuery = Settings.getActiveQueries()[0];
+        let org = firstQuery?.organization ?? Settings.organization;
+        let project = firstQuery?.project ?? Settings.project;
+        if (!org) {
+            org = (await vscode.window.showInputBox({ prompt: 'Azure DevOps organization (name or URL)' })) ?? '';
+        }
+        if (!project) {
+            project = (await vscode.window.showInputBox({ prompt: 'Azure DevOps project' })) ?? '';
+        }
+        if (!org || !project) {
+            vscode.window.showWarningMessage('Organization and project are required to create a work item.');
+            return;
+        }
+
+        const type = await vscode.window.showQuickPick(['Task', 'Bug', 'User Story', 'Feature', 'Issue'], {
+            placeHolder: 'Work item type to create'
+        });
+        if (!type) return;
+
+        await vscode.window.withProgress(
+            { location: vscode.ProgressLocation.Notification, title: `Creating ${type} in Azure DevOps…` },
+            async () => { await syncEngine?.pushTaskToAdo(uuid, type, org, project); }
+        );
+
+        const updated = taskRepo.getByUuid(uuid);
+        if (updated?.adoId) {
+            vscode.window.showInformationMessage(`Created work item #${updated.adoId} for "${updated.title}".`);
+        } else {
+            vscode.window.showWarningMessage('Could not create the work item. See the Output log for details.');
+        }
+        navigatorProvider?.refresh();
+        workbench?.postSnapshot();
     };
 
     // Open the workbench focused on a given list.
@@ -224,6 +281,24 @@ export async function activate(context: vscode.ExtensionContext) {
             if (name && name.trim()) {
                 projectRepo.createArea(name.trim());
                 navigatorProvider?.refresh();
+            }
+        })
+    );
+
+    // Push a local-only task to ADO from the command palette.
+    context.subscriptions.push(
+        vscode.commands.registerCommand('adoThings.pushToAdo', async () => {
+            const locals = taskRepo.all().filter(t => t.adoId === undefined && !t.completedAt && !t.canceledAt);
+            if (locals.length === 0) {
+                vscode.window.showInformationMessage('No local-only tasks to push.');
+                return;
+            }
+            const pick = await vscode.window.showQuickPick(
+                locals.map(t => ({ label: t.title, description: t.list, uuid: t.uuid })),
+                { placeHolder: 'Select a task to push to Azure DevOps' }
+            );
+            if (pick) {
+                await pushTaskToAdo(pick.uuid);
             }
         })
     );
