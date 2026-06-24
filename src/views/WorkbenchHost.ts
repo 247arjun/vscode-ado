@@ -144,6 +144,11 @@ export class WorkbenchHost {
             case 'openWorkItem':
                 this.callbacks.onOpenWorkItem(msg.adoId);
                 break;
+            case 'openTask': {
+                const detail = this.vmBuilder.buildDetail(msg.uuid);
+                if (detail) this.post({ type: 'taskDetail', detail });
+                break;
+            }
             case 'search': {
                 const tasks = this.tasks.search(msg.query).map(t => this.vmBuilder.toVM(t));
                 this.post({ type: 'searchResults', tasks });
@@ -204,6 +209,20 @@ export class WorkbenchHost {
         <main id="list"></main>
         <div id="empty-state" class="hidden"></div>
     </div>
+    <aside id="detail-pane" class="hidden" aria-label="Task details">
+        <div id="detail-header">
+            <button id="detail-close" class="action-btn" title="Close details" aria-label="Close details">✕</button>
+            <button id="detail-open-ado" class="action-btn hidden" title="Open in browser">Open in ADO ↗</button>
+        </div>
+        <h2 id="detail-title"></h2>
+        <div id="detail-subtitle"></div>
+        <div id="detail-description" class="hidden"></div>
+        <dl id="detail-fields"></dl>
+        <div id="detail-notes-wrap" class="hidden">
+            <div class="detail-section-label">Notes</div>
+            <div id="detail-notes"></div>
+        </div>
+    </aside>
     <script nonce="${nonce}" src="${jsUri}"></script>
 </body>
 </html>`;

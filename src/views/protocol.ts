@@ -51,6 +51,30 @@ export interface SyncStatusVM {
     lastSyncedUtc?: string;
 }
 
+/** A single read-only field shown in the task detail pane. */
+export interface DetailField {
+    label: string;
+    value: string;
+    /** 'html' values are ADO rich text; the webview renders them sanitized. */
+    kind?: 'text' | 'html' | 'date' | 'identity';
+}
+
+/** Full read-only detail for one task (rich ADO fields + local fields). */
+export interface TaskDetailVM {
+    uuid: string;
+    title: string;
+    adoId?: number;
+    type?: string;
+    state?: string;
+    /** Local-only markdown notes. */
+    notes: string;
+    /** ADO rich-text description (HTML), if any. */
+    description?: string;
+    /** Ordered, present-only metadata fields for display. */
+    fields: DetailField[];
+    url?: string;
+}
+
 /** Webview -> Host */
 export type WebviewToHost =
     | { type: 'ready' }
@@ -65,6 +89,7 @@ export type WebviewToHost =
     | { type: 'openWorkItem'; adoId: number }
     | { type: 'changeState'; uuid: string }
     | { type: 'pushToAdo'; uuid: string }
+    | { type: 'openTask'; uuid: string }
     | { type: 'search'; query: string };
 
 /** Host -> Webview */
@@ -72,4 +97,5 @@ export type HostToWebview =
     | { type: 'snapshot'; snapshot: ViewSnapshot }
     | { type: 'syncStatus'; status: SyncStatusVM }
     | { type: 'taskUpdated'; task: TaskVM }
+    | { type: 'taskDetail'; detail: TaskDetailVM }
     | { type: 'searchResults'; tasks: TaskVM[] };

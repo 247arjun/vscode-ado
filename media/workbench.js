@@ -12,7 +12,16 @@
         banner: document.getElementById('sync-banner'),
         quickInput: document.getElementById('quick-add-input'),
         list: document.getElementById('list'),
-        empty: document.getElementById('empty-state')
+        empty: document.getElementById('empty-state'),
+        detail: document.getElementById('detail-pane'),
+        detailTitle: document.getElementById('detail-title'),
+        detailSubtitle: document.getElementById('detail-subtitle'),
+        detailDescription: document.getElementById('detail-description'),
+        detailFields: document.getElementById('detail-fields'),
+        detailNotesWrap: document.getElementById('detail-notes-wrap'),
+        detailNotes: document.getElementById('detail-notes'),
+        detailClose: document.getElementById('detail-close'),
+        detailOpenAdo: document.getElementById('detail-open-ado')
     };
 
     const EMPTY_MESSAGES = {
@@ -70,6 +79,11 @@
         // Title + metadata
         const main = el('div', 'task-main');
         const title = el('div', 'task-title', task.title);
+        title.title = 'Open details';
+        title.addEventListener('click', (e) => {
+            e.stopPropagation();
+            send({ type: 'openTask', uuid: task.uuid });
+        });
         main.appendChild(title);
 
         const meta = el('div', 'task-meta');
@@ -158,6 +172,55 @@
         document.getElementById('quick-add').style.display = snapshot.view === 'logbook' ? 'none' : '';
     }
 
+    // Strip HTML tags to plain text (safe rendering of ADO rich text under CSP).
+    function htmlToText(html) {
+        const tmp = document.createElement('div');
+        tmp.innerHTML = html;
+        return tmp.textContent || tmp.innerText || '';
+    }
+
+    function renderDetail(detail) {
+        els.detailTitle.textContent = (detail.adoId ? '#' + detail.adoId + ' ' : '') + detail.title;
+        els.detailSubtitle.textContent = [detail.type, detail.state].filter(Boolean).join(' · ');
+
+        // ADO description (rendered as safe plain text for Slice 1).
+        if (detail.description) {
+            els.detailDescription.textContent = htmlToText(detail.description);
+            els.detailDescription.classList.remove('hidden');
+        } else {
+            els.detailDescription.classList.add('hidden');
+        }
+
+        // Metadata fields.
+        els.detailFields.innerHTML = '';
+        for (const field of detail.fields) {
+            els.detailFields.appendChild(el('dt', null, field.label));
+            els.detailFields.appendChild(el('dd', null, field.value));
+        }
+
+        // Local notes.
+        if (detail.notes) {
+            els.detailNotes.textContent = detail.notes;
+            els.detailNotesWrap.classList.remove('hidden');
+        } else {
+            els.detailNotesWrap.classList.add('hidden');
+        }
+
+        // Open-in-ADO button.
+        if (detail.adoId) {
+            els.detailOpenAdo.classList.remove('hidden');
+            els.detailOpenAdo.onclick = () => send({ type: 'openWorkItem', adoId: detail.adoId });
+        } else {
+            els.detailOpenAdo.classList.add('hidden');
+        }
+
+        els.detail.classList.remove('hidden');
+    }
+
+    function closeDetail() {
+        els.detail.classList.add('hidden');
+    }
+
     function renderSyncStatus(status) {
         if (status.phase === 'offline') {
             els.banner.textContent = 'Offline — showing cached data';
@@ -223,6 +286,16 @@
             case 'syncStatus':
                 renderSyncStatus(msg.status);
                 break;
+            case 'taskDetail':
+                renderDetail(msg.detail);
+                break;
+        }
+    });
+
+    els.detailClose.addEventListener('click', closeDetail);
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !els.detail.classList.contains('hidden')) {
+            closeDetail();
         }
     });
 

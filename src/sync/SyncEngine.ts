@@ -13,11 +13,23 @@ export const DEFAULT_FIELDS = [
     'System.Id',
     'System.Title',
     'System.State',
+    'System.Reason',
     'System.WorkItemType',
     'System.AssignedTo',
+    'System.AreaPath',
+    'System.IterationPath',
     'System.Tags',
+    'System.Description',
+    'System.CreatedBy',
+    'System.CreatedDate',
+    'System.ChangedBy',
     'System.ChangedDate',
     'Microsoft.VSTS.Common.Priority',
+    'Microsoft.VSTS.Common.Severity',
+    'Microsoft.VSTS.Scheduling.Effort',
+    'Microsoft.VSTS.Scheduling.StoryPoints',
+    'Microsoft.VSTS.Scheduling.RemainingWork',
+    'Microsoft.VSTS.Scheduling.StartDate',
     'Microsoft.VSTS.Scheduling.DueDate'
 ];
 

@@ -3,8 +3,10 @@ import { orderBetween, needsRebalance } from '../views/ordering';
 import { parseQuickEntry } from '../views/quickEntry';
 import { Database } from '../db/Database';
 import { TaskRepository } from '../db/repositories/TaskRepository';
+import { WorkItemRepository, workItemRowFromAdo } from '../db/repositories/WorkItemRepository';
 import { ProjectRepository } from '../db/repositories/ProjectRepository';
 import { TagRepository } from '../db/repositories/TagRepository';
+import { ViewModelBuilder } from '../views/ViewModelBuilder';
 import { UndoStack } from '../undo/UndoStack';
 
 let passed = 0;
@@ -102,6 +104,48 @@ export async function runTests(): Promise<void> {
         undo.undo();
         assert.strictEqual(tasks.getByList('logbook').length, 0);
         assert.strictEqual(tasks.getByList('inbox').length, 1);
+    });
+
+    await test('buildDetail exposes rich ADO fields for a linked task', async () => {
+        const db = await Database.openInMemory();
+        const tasks = new TaskRepository(db);
+        const wi = new WorkItemRepository(db);
+        const tags = new TagRepository(db);
+        wi.upsert(workItemRowFromAdo(321, {
+            'System.Title': 'Investigate latency',
+            'System.State': 'Active',
+            'System.WorkItemType': 'Bug',
+            'System.Description': '<div>Page loads slowly</div>',
+            'System.AssignedTo': { displayName: 'Ada Lovelace' },
+            'System.AreaPath': 'Contoso\\Web',
+            'System.IterationPath': 'Contoso\\Sprint 5',
+            'Microsoft.VSTS.Common.Priority': 1
+        }, 3, 'Contoso', 'Web'));
+        tasks.reconcileFromWorkItem(321, 'Investigate latency', 'Active');
+
+        const builder = new ViewModelBuilder(tasks, wi, tags);
+        const task = tasks.getByAdoId(321)!;
+        const detail = builder.buildDetail(task.uuid)!;
+
+        assert.strictEqual(detail.adoId, 321);
+        assert.strictEqual(detail.type, 'Bug');
+        assert.ok(detail.description && detail.description.includes('slowly'));
+        const byLabel = (l: string) => detail.fields.find(f => f.label === l)?.value;
+        assert.strictEqual(byLabel('Assigned To'), 'Ada Lovelace');
+        assert.strictEqual(byLabel('Area Path'), 'Contoso\\Web');
+        assert.strictEqual(byLabel('Iteration'), 'Contoso\\Sprint 5');
+        assert.strictEqual(byLabel('Priority'), '1');
+    });
+
+    await test('buildDetail marks a local-only task as not in ADO', async () => {
+        const db = await Database.openInMemory();
+        const tasks = new TaskRepository(db);
+        const wi = new WorkItemRepository(db);
+        const builder = new ViewModelBuilder(tasks, wi, new TagRepository(db));
+        const t = tasks.createLocal('Just local');
+        const detail = builder.buildDetail(t.uuid)!;
+        assert.strictEqual(detail.adoId, undefined);
+        assert.ok(detail.fields.some(f => f.value.includes('Local-only')));
     });
 
     console.log(`\n${passed}/${passed + failed} passed, ${failed} failed`);
