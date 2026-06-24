@@ -9,6 +9,7 @@ import { runTests as runGroupingEngineTests } from './groupingEngine.test';
 import { runTests as runUrlParsingTests } from './urlParsing.test';
 import { runTests as runDatabaseTests } from './database.test';
 import { runTests as runOutboxTests } from './outbox.test';
+import { runTests as runFeatureTests } from './features.test';
 
 async function main(): Promise<void> {
     console.log('╔══════════════════════════════════════╗');
@@ -19,6 +20,7 @@ async function main(): Promise<void> {
     runUrlParsingTests();
     await runDatabaseTests();
     await runOutboxTests();
+    await runFeatureTests();
 
     console.log('\n✔  All test suites passed.\n');
 }

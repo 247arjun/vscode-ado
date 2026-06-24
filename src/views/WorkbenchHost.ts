@@ -1,6 +1,9 @@
 import * as vscode from 'vscode';
 import { TaskRepository } from '../db/repositories/TaskRepository';
+import { TagRepository } from '../db/repositories/TagRepository';
 import { ViewModelBuilder } from './ViewModelBuilder';
+import { parseQuickEntry } from './quickEntry';
+import { UndoStack } from '../undo/UndoStack';
 import { ViewId, WebviewToHost, HostToWebview, SyncStatusVM } from './protocol';
 
 function getNonce(): string {
@@ -36,7 +39,9 @@ export class WorkbenchHost {
         private readonly extensionUri: vscode.Uri,
         private readonly tasks: TaskRepository,
         private readonly vmBuilder: ViewModelBuilder,
-        private readonly callbacks: WorkbenchCallbacks
+        private readonly callbacks: WorkbenchCallbacks,
+        private readonly tags?: TagRepository,
+        private readonly undoStack?: UndoStack
     ) {}
 
     /** Open (or reveal) the workbench focused on a given view. */
@@ -91,18 +96,24 @@ export class WorkbenchHost {
                 this.currentView = msg.view;
                 this.postSnapshot();
                 break;
-            case 'completeTask':
+            case 'completeTask': {
+                const snap = this.tasks.snapshot(msg.uuid);
                 this.tasks.complete(msg.uuid);
+                if (snap) this.undoStack?.push('Complete task', () => this.tasks.restoreSnapshot(snap));
                 this.afterMutation();
                 break;
+            }
             case 'uncompleteTask':
                 this.tasks.uncomplete(msg.uuid);
                 this.afterMutation();
                 break;
-            case 'updateTask':
+            case 'updateTask': {
+                const snap = this.tasks.snapshot(msg.uuid);
                 this.tasks.update(msg.uuid, msg.patch);
+                if (snap) this.undoStack?.push('Edit task', () => this.tasks.restoreSnapshot(snap));
                 this.afterMutation();
                 break;
+            }
             case 'moveToToday':
                 this.tasks.moveToToday(msg.uuid);
                 this.afterMutation();
@@ -116,8 +127,7 @@ export class WorkbenchHost {
                 this.afterMutation();
                 break;
             case 'createTask': {
-                const list = msg.view === 'someday' ? 'someday' : msg.view === 'anytime' ? 'anytime' : 'inbox';
-                this.tasks.createLocal(msg.title, list);
+                this.createFromQuickEntry(msg.title, msg.view);
                 this.afterMutation();
                 break;
             }
@@ -139,6 +149,20 @@ export class WorkbenchHost {
     private afterMutation(): void {
         this.postSnapshot();
         this.callbacks.onDataChanged();
+    }
+
+    /** Create a task from a quick-entry line, applying #tags and today/tomorrow. */
+    private createFromQuickEntry(raw: string, view: ViewId): void {
+        const parsed = parseQuickEntry(raw);
+        const title = parsed.title || raw.trim();
+        const list = view === 'someday' ? 'someday' : view === 'anytime' ? 'anytime' : 'inbox';
+        const task = this.tasks.createLocal(title, list);
+        if (parsed.whenDate) this.tasks.setWhen(task.uuid, parsed.whenDate);
+        if (this.tags && parsed.tags.length > 0) {
+            const ids = parsed.tags.map(name => this.tags!.getOrCreate(name).id);
+            this.tasks.setTags(task.uuid, ids);
+        }
+        this.undoStack?.push('Add task', () => this.tasks.remove(task.uuid));
     }
 
     private renderHtml(webview: vscode.Webview): string {

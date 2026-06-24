@@ -1,5 +1,6 @@
 import { TaskRepository } from '../db/repositories/TaskRepository';
 import { WorkItemRepository } from '../db/repositories/WorkItemRepository';
+import { TagRepository } from '../db/repositories/TagRepository';
 import { Task } from '../model/types';
 import { ViewId, TaskVM, ViewSnapshot, TaskGroupVM } from './protocol';
 
@@ -27,7 +28,8 @@ function dateHeader(iso: string): string {
 export class ViewModelBuilder {
     constructor(
         private readonly tasks: TaskRepository,
-        private readonly workItems: WorkItemRepository
+        private readonly workItems: WorkItemRepository,
+        private readonly tags?: TagRepository
     ) {}
 
     toVM(task: Task): TaskVM {
@@ -49,7 +51,7 @@ export class ViewModelBuilder {
             deadline: task.deadline,
             completed: !!task.completedAt || !!task.canceledAt,
             today: task.todayFlag === 1,
-            tags: []
+            tags: this.tags?.namesFor(task.tagIds) ?? []
         };
     }
 

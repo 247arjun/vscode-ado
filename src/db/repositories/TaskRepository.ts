@@ -1,6 +1,7 @@
 import { Database } from '../Database';
 import { Task, ListName } from '../../model/types';
 import { newUuid } from './WorkItemRepository';
+import { orderBetween } from '../../views/ordering';
 
 const DONE_STATE_CATEGORIES = ['Completed', 'Resolved', 'Closed', 'Done'];
 
@@ -191,5 +192,54 @@ export class TaskRepository {
         return this.rows().filter(t =>
             t.title.toLowerCase().includes(q) || t.notes.toLowerCase().includes(q)
         );
+    }
+
+    /** Manually reposition a task between two siblings (fractional indexing). */
+    reorder(uuid: string, beforeUuid?: string, afterUuid?: string): void {
+        const before = beforeUuid ? this.getByUuid(beforeUuid)?.sortOrder : undefined;
+        const after = afterUuid ? this.getByUuid(afterUuid)?.sortOrder : undefined;
+        this.update(uuid, { sortOrder: orderBetween(before, after) });
+    }
+
+    /** Replace the local-only tag set on a task. */
+    setTags(uuid: string, tagIds: number[]): void {
+        this.update(uuid, { tagIds });
+    }
+
+    addTag(uuid: string, tagId: number): void {
+        const task = this.getByUuid(uuid);
+        if (!task) return;
+        if (!task.tagIds.includes(tagId)) {
+            this.update(uuid, { tagIds: [...task.tagIds, tagId] });
+        }
+    }
+
+    /** Move a task into (or out of) a project. */
+    assignToProject(uuid: string, projectUuid: string | undefined): void {
+        this.update(uuid, { projectUuid });
+    }
+
+    /** Deep-clone a task for undo snapshots. */
+    snapshot(uuid: string): Task | undefined {
+        const task = this.getByUuid(uuid);
+        return task ? JSON.parse(JSON.stringify(task)) as Task : undefined;
+    }
+
+    /** Restore a previously captured snapshot (re-inserting if it was removed). */
+    restoreSnapshot(snap: Task): void {
+        const rows = this.rows();
+        const idx = rows.findIndex(t => t.uuid === snap.uuid);
+        if (idx >= 0) {
+            rows[idx] = snap;
+        } else {
+            rows.push(snap);
+        }
+        this.db.save();
+    }
+
+    /** Remove a task entirely (used to undo a creation). */
+    remove(uuid: string): void {
+        this.db.setTable('tasks', this.rows().filter(t => t.uuid !== uuid));
+        this.db.save();
     }
 }

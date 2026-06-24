@@ -126,6 +126,18 @@
         "command": "adoThings.quickCapture",
         "title": "ADO Things: Quick Add Task",
         "icon": "$(add)"
+      },
+      {
+        "command": "adoThings.undo",
+        "title": "ADO Things: Undo Last Change"
+      },
+      {
+        "command": "adoThings.newProject",
+        "title": "ADO Things: New Project"
+      },
+      {
+        "command": "adoThings.newArea",
+        "title": "ADO Things: New Area"
       }
     ],
     "keybindings": [
@@ -139,6 +151,11 @@
         "command": "adoThings.quickCapture",
         "key": "ctrl+alt+n",
         "mac": "cmd+alt+n"
+      },
+      {
+        "command": "adoThings.undo",
+        "key": "ctrl+alt+z",
+        "mac": "cmd+alt+z"
       }
     ],
     "menus": {

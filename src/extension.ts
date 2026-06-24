@@ -15,6 +15,10 @@ import { NavigatorProvider } from './views/NavigatorProvider';
 import { WorkbenchHost } from './views/WorkbenchHost';
 import { ViewModelBuilder } from './views/ViewModelBuilder';
 import { ViewId } from './views/protocol';
+import { TagRepository } from './db/repositories/TagRepository';
+import { ProjectRepository } from './db/repositories/ProjectRepository';
+import { UndoStack } from './undo/UndoStack';
+import { parseQuickEntry } from './views/quickEntry';
 
 let treeProvider: AdoTreeProvider | undefined;
 let treeView: vscode.TreeView<AdoTreeItem> | undefined;
@@ -102,9 +106,12 @@ export async function activate(context: vscode.ExtensionContext) {
     // ── Phase 4: Things-style navigator + workbench ──────────────────
     const taskRepo = dataStore.taskRepository;
     const workItemRepo = dataStore.workItemRepository;
-    const vmBuilder = new ViewModelBuilder(taskRepo, workItemRepo);
+    const tagRepo = new TagRepository(database);
+    const projectRepo = new ProjectRepository(database, taskRepo);
+    const undoStack = new UndoStack();
+    const vmBuilder = new ViewModelBuilder(taskRepo, workItemRepo, tagRepo);
 
-    navigatorProvider = new NavigatorProvider(taskRepo);
+    navigatorProvider = new NavigatorProvider(taskRepo, projectRepo);
     const navView = vscode.window.createTreeView('adoThings.navigator', {
         treeDataProvider: navigatorProvider
     });
@@ -117,7 +124,7 @@ export async function activate(context: vscode.ExtensionContext) {
             if (url) { void vscode.env.openExternal(vscode.Uri.parse(url)); }
         },
         onDataChanged: () => navigatorProvider?.refresh()
-    });
+    }, tagRepo, undoStack);
     context.subscriptions.push({ dispose: () => workbench?.dispose() });
 
     // Sync status feeds both the workbench banner and the navigator counts.
@@ -170,13 +177,53 @@ export async function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('adoThings.quickCapture', async () => {
             const title = await vscode.window.showInputBox({
                 prompt: 'New To-Do',
-                placeHolder: 'What do you need to do?'
+                placeHolder: 'What do you need to do? (try "#tag" or "tomorrow")'
             });
             if (title && title.trim()) {
-                taskRepo.createLocal(title.trim(), 'inbox');
+                const parsed = parseQuickEntry(title.trim());
+                const task = taskRepo.createLocal(parsed.title || title.trim(), 'inbox');
+                if (parsed.whenDate) taskRepo.setWhen(task.uuid, parsed.whenDate);
+                if (parsed.tags.length > 0) {
+                    taskRepo.setTags(task.uuid, parsed.tags.map(n => tagRepo.getOrCreate(n).id));
+                }
+                undoStack.push('Add task', () => taskRepo.remove(task.uuid));
                 navigatorProvider?.refresh();
                 workbench?.postSnapshot();
-                vscode.window.setStatusBarMessage(`Added to Inbox: ${title.trim()}`, 2000);
+                vscode.window.setStatusBarMessage(`Added to Inbox: ${parsed.title || title.trim()}`, 2000);
+            }
+        })
+    );
+
+    // Undo the most recent local change.
+    context.subscriptions.push(
+        vscode.commands.registerCommand('adoThings.undo', () => {
+            const label = undoStack.undo();
+            if (label) {
+                navigatorProvider?.refresh();
+                workbench?.postSnapshot();
+                vscode.window.setStatusBarMessage(`Undid: ${label}`, 2000);
+            } else {
+                vscode.window.setStatusBarMessage('Nothing to undo', 1500);
+            }
+        })
+    );
+
+    // Create a project / area.
+    context.subscriptions.push(
+        vscode.commands.registerCommand('adoThings.newProject', async () => {
+            const name = await vscode.window.showInputBox({ prompt: 'New project name' });
+            if (name && name.trim()) {
+                projectRepo.createProject(name.trim());
+                navigatorProvider?.refresh();
+            }
+        })
+    );
+    context.subscriptions.push(
+        vscode.commands.registerCommand('adoThings.newArea', async () => {
+            const name = await vscode.window.showInputBox({ prompt: 'New area name' });
+            if (name && name.trim()) {
+                projectRepo.createArea(name.trim());
+                navigatorProvider?.refresh();
             }
         })
     );
