@@ -2,7 +2,7 @@
   "name": "azure-devops-queries",
   "displayName": "Azure DevOps Queries",
   "description": "View Azure DevOps queries as a grouped tree in VS Code",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "publisher": "ArjunGopalakrishna",
   "icon": "media/icon.png",
   "repository": {
