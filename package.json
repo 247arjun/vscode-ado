@@ -2,7 +2,7 @@
   "name": "azure-devops-queries",
   "displayName": "Azure DevOps Queries",
   "description": "View Azure DevOps queries as a grouped tree in VS Code",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "publisher": "ArjunGopalakrishna",
   "icon": "media/icon.png",
   "repository": {
@@ -383,6 +383,27 @@
           "type": "integer",
           "default": 200,
           "description": "Batch size for fetching work items (max 200)"
+        },
+        "adoQueries.defaultWorkItemType": {
+          "type": "string",
+          "default": "Task",
+          "enum": ["Task", "Bug", "User Story", "Feature", "Issue"],
+          "description": "Default work item type to create when pushing a local task to Azure DevOps."
+        },
+        "adoQueries.defaultAssignee": {
+          "type": "string",
+          "default": "me",
+          "enum": ["me", "unassigned"],
+          "enumDescriptions": [
+            "Assign new work items to the signed-in user",
+            "Leave new work items unassigned"
+          ],
+          "description": "Default assignee when pushing a local task to Azure DevOps."
+        },
+        "adoQueries.alwaysPromptOnPush": {
+          "type": "boolean",
+          "default": false,
+          "description": "Prompt for work item type and assignee each time you push a task to Azure DevOps. When off, the defaults above are used silently."
         },
         "adoQueries.detailFields": {
           "type": "array",

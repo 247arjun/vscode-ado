@@ -108,6 +108,21 @@ export class Settings {
         return this.getConfig().get<string[]>('detailFields', []);
     }
 
+    /** Default work item type used when pushing a local task to ADO. */
+    static get defaultWorkItemType(): string {
+        return this.getConfig().get<string>('defaultWorkItemType', 'Task');
+    }
+
+    /** Default assignee for newly pushed work items: 'me' or 'unassigned'. */
+    static get defaultAssignee(): string {
+        return this.getConfig().get<string>('defaultAssignee', 'me');
+    }
+
+    /** When true, always prompt for type/assignee on push instead of using defaults. */
+    static get alwaysPromptOnPush(): boolean {
+        return this.getConfig().get<boolean>('alwaysPromptOnPush', false);
+    }
+
     static get cacheTtlSeconds(): number {
         return this.getConfig().get<number>('cacheTtlSeconds', 30);
     }

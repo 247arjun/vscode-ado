@@ -197,38 +197,52 @@ export async function activate(context: vscode.ExtensionContext) {
             }
         }
 
-        // Resolve org/project: prefer a configured query's, fall back to globals, else prompt.
+        // Resolve org/project: prefer a configured query's, fall back to globals,
+        // else prompt once and persist so future pushes are friction-free.
         const firstQuery = Settings.getActiveQueries()[0];
         let org = firstQuery?.organization ?? Settings.organization;
         let project = firstQuery?.project ?? Settings.project;
+        const cfg = vscode.workspace.getConfiguration('adoQueries');
         if (!org) {
-            org = (await vscode.window.showInputBox({ prompt: 'Azure DevOps organization (name or URL)' })) ?? '';
+            org = (await vscode.window.showInputBox({ prompt: 'Azure DevOps organization (name or URL)', placeHolder: 'Saved for next time' })) ?? '';
+            if (org) await cfg.update('organization', org, vscode.ConfigurationTarget.Global);
         }
         if (!project) {
-            project = (await vscode.window.showInputBox({ prompt: 'Azure DevOps project' })) ?? '';
+            project = (await vscode.window.showInputBox({ prompt: 'Azure DevOps project', placeHolder: 'Saved for next time' })) ?? '';
+            if (project) await cfg.update('project', project, vscode.ConfigurationTarget.Global);
         }
         if (!org || !project) {
             vscode.window.showWarningMessage('Organization and project are required to create a work item.');
             return;
         }
 
-        const type = await vscode.window.showQuickPick(['Task', 'Bug', 'User Story', 'Feature', 'Issue'], {
-            placeHolder: 'Work item type to create'
-        });
-        if (!type) return;
+        const promptEach = Settings.alwaysPromptOnPush;
 
-        // Default the assignee to the signed-in user (changeable afterwards).
-        let assignedTo = await tokenProvider?.getSignedInUser();
-        if (assignedTo) {
+        // Work item type: use the configured default unless prompting is on.
+        let type = Settings.defaultWorkItemType || 'Task';
+        if (promptEach) {
+            const picked = await vscode.window.showQuickPick(['Task', 'Bug', 'User Story', 'Feature', 'Issue'], {
+                placeHolder: 'Work item type to create'
+            });
+            if (!picked) return;
+            type = picked;
+        }
+
+        // Assignee: use the configured default ('me' / 'unassigned') unless prompting.
+        let assignedTo: string | undefined;
+        if (promptEach) {
+            const me = await tokenProvider?.getSignedInUser();
             const assignChoice = await vscode.window.showQuickPick(
                 [
-                    { label: `Assign to me (${assignedTo})`, value: 'me' },
+                    { label: me ? `Assign to me (${me})` : 'Assign to me', value: 'me' },
                     { label: 'Leave unassigned', value: 'none' }
                 ],
                 { placeHolder: 'Assignee for the new work item' }
             );
             if (!assignChoice) return;
-            if (assignChoice.value === 'none') assignedTo = undefined;
+            assignedTo = assignChoice.value === 'me' ? me : undefined;
+        } else if (Settings.defaultAssignee === 'me') {
+            assignedTo = await tokenProvider?.getSignedInUser();
         }
 
         await vscode.window.withProgress(
