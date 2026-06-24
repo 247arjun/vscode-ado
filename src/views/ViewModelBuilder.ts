@@ -144,6 +144,10 @@ export class ViewModelBuilder {
             // Always show editable fields (so users can set an empty one); only
             // skip empty read-only fields to keep the pane tidy.
             if (!value && !editable) continue;
+            // Identity fields edit by unique name (email); display by name.
+            const editValue = def.control === 'identity'
+                ? this.identityUniqueName(raw)
+                : this.editValueFor(raw, def.control);
             detail.fields.push({
                 label: def.label,
                 value,
@@ -154,7 +158,7 @@ export class ViewModelBuilder {
                 control: def.control,
                 editable,
                 options: def.options,
-                editValue: this.editValueFor(raw, def.control)
+                editValue
             });
         }
 
@@ -181,6 +185,16 @@ export class ViewModelBuilder {
                 detail.fields.push({ label: def.label, value: localTags.join(', '), key: def.key, source: 'local', control: 'readonly', editable: false });
             }
         }
+    }
+
+    /** Extract an identity's unique name (email/UPN) for editing. */
+    private identityUniqueName(raw: unknown): string {
+        if (raw && typeof raw === 'object') {
+            const id = raw as Record<string, unknown>;
+            if (typeof id['uniqueName'] === 'string') return id['uniqueName'] as string;
+            if (typeof id['displayName'] === 'string') return id['displayName'] as string;
+        }
+        return typeof raw === 'string' ? raw : '';
     }
 
     /** Raw value for binding to an editor control. */

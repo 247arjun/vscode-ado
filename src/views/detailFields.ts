@@ -29,7 +29,7 @@ export const DETAIL_FIELD_CATALOG: DetailFieldDef[] = [
     { key: 'System.Description', ref: 'System.Description', label: 'Description', source: 'ado', control: 'html', editable: false },
     { key: 'System.State', ref: 'System.State', label: 'State', source: 'ado', control: 'readonly', editable: false },
     { key: 'System.Reason', ref: 'System.Reason', label: 'Reason', source: 'ado', control: 'text', editable: true },
-    { key: 'System.AssignedTo', ref: 'System.AssignedTo', label: 'Assigned To', source: 'ado', control: 'identity', editable: false },
+    { key: 'System.AssignedTo', ref: 'System.AssignedTo', label: 'Assigned To', source: 'ado', control: 'identity', editable: true },
     { key: 'System.AreaPath', ref: 'System.AreaPath', label: 'Area Path', source: 'ado', control: 'readonly', editable: false },
     { key: 'System.IterationPath', ref: 'System.IterationPath', label: 'Iteration', source: 'ado', control: 'readonly', editable: false },
     { key: 'Microsoft.VSTS.Common.Priority', ref: 'Microsoft.VSTS.Common.Priority', label: 'Priority', source: 'ado', control: 'enum', editable: true, options: ['1', '2', '3', '4'] },

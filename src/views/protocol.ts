@@ -85,6 +85,8 @@ export interface TaskDetailVM {
     /** Ordered, present-only metadata fields for display. */
     fields: DetailField[];
     url?: string;
+    /** Signed-in user's unique name, for the "Assign to me" shortcut. */
+    currentUser?: string;
 }
 
 /** Webview -> Host */

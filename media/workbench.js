@@ -254,6 +254,27 @@
             }
             input.value = field.editValue || '';
             input.addEventListener('change', () => commit(input.value));
+        } else if (field.control === 'identity') {
+            // Editable assignee: text entry (email/UPN) + "Assign to me".
+            const wrap = el('div', 'identity-edit');
+            input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'detail-input';
+            input.placeholder = 'name@company.com';
+            input.value = field.editValue || '';
+            input.addEventListener('change', () => commit(input.value));
+            wrap.appendChild(input);
+            if (detail.currentUser) {
+                const me = el('button', 'action-btn assign-me', 'Assign to me');
+                me.title = 'Assign to ' + detail.currentUser;
+                me.addEventListener('click', () => {
+                    input.value = detail.currentUser;
+                    commit(detail.currentUser);
+                });
+                wrap.appendChild(me);
+            }
+            dd.appendChild(wrap);
+            return dd;
         } else if (field.control === 'date') {
             input = document.createElement('input');
             input.type = 'date';

@@ -167,6 +167,39 @@ export async function runTests(): Promise<void> {
         assert.ok(new WorkItemRepository(db).getById(9001), 'work item mirror row should exist');
     });
 
+    await test('create_work_item passes the assignee through to ADO', async () => {
+        const db = await Database.openInMemory();
+        const tasks = new TaskRepository(db);
+        const local = tasks.createLocal('Assign me');
+        let capturedFields: Record<string, unknown> = {};
+        const rest = {
+            async createWorkItem(_o: string, _p: string, _type: string, fields: Record<string, unknown>) {
+                capturedFields = fields;
+                return { success: true, workItem: { id: 4242, fields } as any, etag: 'e', rev: 1 } as PatchResult;
+            },
+            async patchWorkItem() { return { success: true } as PatchResult; },
+            async getWorkItem() { return undefined; }
+        };
+        const resolver = new ConflictResolver(rest as unknown as AdoRestClient, new WorkItemRepository(db), async () => 'theirs', () => {});
+        const proc = new OutboxProcessor(db, rest as unknown as AdoRestClient, resolver, () => {});
+        proc.enqueueCreate(local.uuid, 'Task', 'org', 'proj', local.title, 'me@contoso.com');
+        await proc.process();
+        assert.strictEqual(capturedFields['System.AssignedTo'], 'me@contoso.com');
+        assert.strictEqual(tasks.getByUuid(local.uuid)!.adoId, 4242);
+    });
+
+    await test('update_fields can set System.AssignedTo', async () => {
+        const db = await Database.openInMemory();
+        seedWorkItem(db);
+        const rest = new FakeRest();
+        rest.patchResults = [{ success: true, workItem: { id: 55, fields: {} } as any, etag: 'etag-a', rev: 6 }];
+        const resolver = new ConflictResolver(rest as unknown as AdoRestClient, new WorkItemRepository(db), async () => 'theirs', () => {});
+        const proc = new OutboxProcessor(db, rest as unknown as AdoRestClient, resolver, () => {});
+        proc.enqueueFieldUpdate(55, 'System.AssignedTo', 'someone@contoso.com');
+        await proc.process();
+        assert.strictEqual(new WorkItemRepository(db).getById(55)!.fields['System.AssignedTo'], 'someone@contoso.com');
+    });
+
     await test('soak: many ops with intermittent throttling eventually drain', async () => {
         const db = await Database.openInMemory();
         const wiRepo = new WorkItemRepository(db);

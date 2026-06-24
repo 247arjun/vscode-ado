@@ -95,6 +95,27 @@ export class TokenProvider {
         return false;
     }
 
+    /**
+     * The signed-in user's unique name (email/UPN), used to default the
+     * "Assigned To" field. Falls back to the Azure CLI's signed-in user.
+     */
+    async getSignedInUser(): Promise<string | undefined> {
+        const session = await this.getMicrosoftSession(false);
+        // account.label is typically the UPN/email; fall back to the CLI user.
+        const label = session?.account?.label;
+        if (label && label.includes('@')) return label;
+
+        try {
+            const result = await this.cliRunner.execute<{ user?: { name?: string } }>(['account', 'show']);
+            if (result.success && result.data?.user?.name) {
+                return result.data.user.name;
+            }
+        } catch {
+            // ignore
+        }
+        return label;
+    }
+
     private async getMicrosoftSession(createIfNone: boolean): Promise<vscode.AuthenticationSession | undefined> {
         try {
             return await vscode.authentication.getSession('microsoft', ADO_SCOPES, {

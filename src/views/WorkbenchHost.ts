@@ -40,6 +40,7 @@ export class WorkbenchHost {
     private currentView: ViewId = 'today';
     private lastStatus: SyncStatusVM = { phase: 'idle', pendingCount: 0 };
     private openDetailUuid: string | undefined;
+    private currentUser: string | undefined;
 
     constructor(
         private readonly extensionUri: vscode.Uri,
@@ -87,6 +88,11 @@ export class WorkbenchHost {
     setSyncStatus(status: SyncStatusVM): void {
         this.lastStatus = status;
         this.post({ type: 'syncStatus', status });
+    }
+
+    /** Provide the signed-in user's name for the "Assign to me" shortcut. */
+    setCurrentUser(user: string | undefined): void {
+        this.currentUser = user;
     }
 
     private post(msg: HostToWebview): void {
@@ -153,7 +159,10 @@ export class WorkbenchHost {
             case 'openTask': {
                 this.openDetailUuid = msg.uuid;
                 const detail = this.vmBuilder.buildDetail(msg.uuid, Settings.detailFields);
-                if (detail) this.post({ type: 'taskDetail', detail });
+                if (detail) {
+                    detail.currentUser = this.currentUser;
+                    this.post({ type: 'taskDetail', detail });
+                }
                 break;
             }
             case 'closeTask':
@@ -180,7 +189,10 @@ export class WorkbenchHost {
     /** Re-send the detail snapshot so edited values reflect immediately. */
     private reopenDetail(uuid: string): void {
         const detail = this.vmBuilder.buildDetail(uuid, Settings.detailFields);
-        if (detail) this.post({ type: 'taskDetail', detail });
+        if (detail) {
+            detail.currentUser = this.currentUser;
+            this.post({ type: 'taskDetail', detail });
+        }
     }
 
     /** Refresh the currently open detail pane (e.g. after a settings change). */

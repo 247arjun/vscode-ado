@@ -70,6 +70,9 @@ export async function activate(context: vscode.ExtensionContext) {
     const refreshAuthContext = async () => {
         const signedIn = (await tokenProvider?.isSignedIn()) ?? false;
         await vscode.commands.executeCommand('setContext', 'adoQueries.signedIn', signedIn);
+        // Cache the signed-in user for the "Assign to me" shortcut.
+        const user = signedIn ? await tokenProvider?.getSignedInUser() : undefined;
+        workbench?.setCurrentUser(user);
     };
     tokenProvider.onDidChangeAuth(() => { void refreshAuthContext(); });
     void refreshAuthContext();
@@ -136,6 +139,9 @@ export async function activate(context: vscode.ExtensionContext) {
         onDataChanged: () => navigatorProvider?.refresh()
     }, tagRepo, undoStack);
     context.subscriptions.push({ dispose: () => workbench?.dispose() });
+
+    // Now that the workbench exists, populate the signed-in user for it.
+    void refreshAuthContext();
 
     // Sync status feeds both the workbench banner and the navigator counts.
     syncEngine.onDidChangeStatus((s) => {
@@ -211,9 +217,23 @@ export async function activate(context: vscode.ExtensionContext) {
         });
         if (!type) return;
 
+        // Default the assignee to the signed-in user (changeable afterwards).
+        let assignedTo = await tokenProvider?.getSignedInUser();
+        if (assignedTo) {
+            const assignChoice = await vscode.window.showQuickPick(
+                [
+                    { label: `Assign to me (${assignedTo})`, value: 'me' },
+                    { label: 'Leave unassigned', value: 'none' }
+                ],
+                { placeHolder: 'Assignee for the new work item' }
+            );
+            if (!assignChoice) return;
+            if (assignChoice.value === 'none') assignedTo = undefined;
+        }
+
         await vscode.window.withProgress(
             { location: vscode.ProgressLocation.Notification, title: `Creating ${type} in Azure DevOps…` },
-            async () => { await syncEngine?.pushTaskToAdo(uuid, type, org, project); }
+            async () => { await syncEngine?.pushTaskToAdo(uuid, type, org, project, assignedTo); }
         );
 
         const updated = taskRepo.getByUuid(uuid);

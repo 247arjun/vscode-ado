@@ -166,7 +166,26 @@ export async function runTests(): Promise<void> {
         assert.strictEqual(detail.fields[0].editable, true);
         assert.strictEqual(detail.fields[0].editValue, '2');
         assert.strictEqual(detail.fields[1].label, 'Assigned To');
-        assert.strictEqual(detail.fields[1].editable, false);
+        assert.strictEqual(detail.fields[1].editable, true);
+    });
+
+    await test('Assigned To is editable and edits by unique name (email)', async () => {
+        const db = await Database.openInMemory();
+        const tasks = new TaskRepository(db);
+        const wi = new WorkItemRepository(db);
+        wi.upsert(workItemRowFromAdo(60, {
+            'System.Title': 'Y', 'System.State': 'Active', 'System.WorkItemType': 'Task',
+            'System.AssignedTo': { displayName: 'Ada Lovelace', uniqueName: 'ada@contoso.com' }
+        }, 1, 'Org', 'Proj'));
+        tasks.reconcileFromWorkItem(60, 'Y', 'Active');
+        const builder = new ViewModelBuilder(tasks, wi, new TagRepository(db));
+        const t = tasks.getByAdoId(60)!;
+        const detail = builder.buildDetail(t.uuid, ['System.AssignedTo'])!;
+        const assignee = detail.fields[0];
+        assert.strictEqual(assignee.label, 'Assigned To');
+        assert.strictEqual(assignee.editable, true);
+        assert.strictEqual(assignee.value, 'Ada Lovelace');     // display
+        assert.strictEqual(assignee.editValue, 'ada@contoso.com'); // edit by email
     });
 
     console.log(`\n${passed}/${passed + failed} passed, ${failed} failed`);

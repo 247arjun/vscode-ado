@@ -100,10 +100,10 @@ export class SyncEngine {
     }
 
     /** Create a new ADO work item from a local task, then drain the outbox. */
-    async pushTaskToAdo(taskUuid: string, type: string, org: string, project: string): Promise<void> {
+    async pushTaskToAdo(taskUuid: string, type: string, org: string, project: string, assignedTo?: string): Promise<void> {
         const task = this.tasks.getByUuid(taskUuid);
         if (!task) return;
-        this.outbox.enqueueCreate(taskUuid, type, org, project, task.title);
+        this.outbox.enqueueCreate(taskUuid, type, org, project, task.title, assignedTo);
         this.setStatus({ pendingCount: this.outbox.pendingCount });
         await this.processOutbox();
     }

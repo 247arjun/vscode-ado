@@ -62,12 +62,12 @@ export class OutboxProcessor {
     }
 
     /** Enqueue creation of a brand-new ADO work item from a local task. */
-    enqueueCreate(taskUuid: string, type: string, org: string, project: string, title: string): void {
+    enqueueCreate(taskUuid: string, type: string, org: string, project: string, title: string, assignedTo?: string): void {
         this.queue.enqueue({
             entity: 'task',
             targetId: taskUuid,
             opType: 'create_work_item',
-            payload: { type, org, project, title }
+            payload: { type, org, project, title, assignedTo }
         });
     }
 
@@ -188,7 +188,12 @@ export class OutboxProcessor {
         }
 
         this.queue.setStatus(op.opId, 'inflight');
-        const result = await this.rest.createWorkItem(org, project, type, { 'System.Title': title });
+        const fields: Record<string, unknown> = { 'System.Title': title };
+        const assignedTo = op.payload['assignedTo'];
+        if (typeof assignedTo === 'string' && assignedTo) {
+            fields['System.AssignedTo'] = assignedTo;
+        }
+        const result = await this.rest.createWorkItem(org, project, type, fields);
 
         if (result.success && result.workItem) {
             const newId = result.workItem.id;
