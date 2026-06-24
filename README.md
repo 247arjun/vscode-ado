@@ -2,6 +2,18 @@
 
 A VS Code extension that displays Azure DevOps query results as a grouped tree view, providing a lightweight to-do-style read-only view of your work items.
 
+> **ADO Things (local-first task manager).** The extension now also ships a
+> Things-inspired task manager built on a local database, with Azure DevOps as a
+> sync target. See [spec.md](spec.md) for the full design. Highlights:
+>
+> - **Sidebar navigator** — Inbox · Today · Upcoming · Anytime · Someday · Logbook, plus Projects & Areas (with progress).
+> - **Workbench tab** — a calm, single-column webview (`ADO Things: Open Tasks Workbench`) with circular checkboxes, a completion animation, quick capture, and keyboard navigation.
+> - **Local-first** — a dependency-free local store under the extension's global storage is the source of truth, so the UI is instant and works fully offline; ADO is synced opportunistically.
+> - **Authentication** — uses VS Code's built-in **Microsoft authentication provider** (the same one the official Azure DevOps extension uses). **No personal access token and no app registration** — it reuses your existing VS Code Microsoft sign-in, with the Azure CLI token as a fallback.
+> - **Two-way sync** — an incremental pull plus an outbox-based push with ETag optimistic concurrency and conflict resolution (Keep Mine / Keep Theirs).
+> - **Power features** — tags, projects/areas, manual ordering (fractional indexing), natural-language quick entry (`#tag`, `today`, `tomorrow`), and undo.
+> - **Commands** — `ADO Things: Quick Add Task` (`Ctrl/Cmd+Alt+N`), `Undo Last Change` (`Ctrl/Cmd+Alt+Z`), `New Project`, `New Area`, `Reset Local Database`.
+
 ## Features
 
 - View Azure DevOps query results directly in VS Code

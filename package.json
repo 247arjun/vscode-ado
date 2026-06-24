@@ -138,6 +138,10 @@
       {
         "command": "adoThings.newArea",
         "title": "ADO Things: New Area"
+      },
+      {
+        "command": "adoThings.resetDatabase",
+        "title": "ADO Things: Reset Local Database"
       }
     ],
     "keybindings": [

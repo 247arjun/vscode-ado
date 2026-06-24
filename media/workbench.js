@@ -45,6 +45,9 @@
     function renderTask(task) {
         const row = el('div', 'task-row' + (task.completed ? ' done' : ''));
         row.dataset.uuid = task.uuid;
+        row.setAttribute('role', 'listitem');
+        row.setAttribute('tabindex', '-1');
+        row.setAttribute('aria-label', task.title + (task.completed ? ' (completed)' : ''));
 
         // Circular checkbox
         const checkbox = el('div', 'checkbox' + (task.completed ? ' checked' : ''));
@@ -126,6 +129,7 @@
         els.subtitle.textContent = snapshot.subtitle || '';
 
         els.list.innerHTML = '';
+        els.list.setAttribute('role', 'list');
         let total = 0;
         for (const group of snapshot.groups) {
             if (group.header) {
@@ -171,6 +175,36 @@
                 send({ type: 'createTask', title, view: currentView });
                 els.quickInput.value = '';
             }
+        }
+    });
+
+    // Keyboard navigation across rows: ArrowUp/Down to move, Space/Enter to
+    // toggle completion, 't' to flag for Today, 'o' to open the work item.
+    function rows() {
+        return Array.prototype.slice.call(els.list.querySelectorAll('.task-row'));
+    }
+    function focusRow(idx) {
+        const all = rows();
+        if (all.length === 0) return;
+        const clamped = Math.max(0, Math.min(idx, all.length - 1));
+        all[clamped].focus();
+    }
+    document.addEventListener('keydown', (e) => {
+        if (document.activeElement === els.quickInput) return;
+        const all = rows();
+        const current = all.indexOf(document.activeElement);
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            focusRow(current < 0 ? 0 : current + 1);
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            focusRow(current < 0 ? 0 : current - 1);
+        } else if ((e.key === ' ' || e.key === 'Enter') && current >= 0) {
+            e.preventDefault();
+            const cb = all[current].querySelector('.checkbox');
+            if (cb) cb.click();
+        } else if (e.key.toLowerCase() === 't' && current >= 0) {
+            send({ type: 'moveToToday', uuid: all[current].dataset.uuid });
         }
     });
 

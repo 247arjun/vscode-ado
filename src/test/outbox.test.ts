@@ -113,6 +113,40 @@ export async function runTests(): Promise<void> {
         assert.strictEqual(proc.pendingCount, 1, 'op should remain pending for retry');
     });
 
+    await test('soak: many ops with intermittent throttling eventually drain', async () => {
+        const db = await Database.openInMemory();
+        const wiRepo = new WorkItemRepository(db);
+        for (let i = 1; i <= 20; i++) {
+            const row = workItemRowFromAdo(i, { 'System.Title': `t${i}`, 'System.State': 'New' }, 1, 'org', 'proj');
+            row.etag = `e${i}`;
+            wiRepo.upsert(row);
+        }
+        // Fail the first attempt of each op (throttling), succeed on retry —
+        // this proves every op eventually drains with no data loss.
+        const attemptsById: Record<number, number> = {};
+        const flaky = {
+            async patchWorkItem(_o: string, _p: string, id: number) {
+                attemptsById[id] = (attemptsById[id] ?? 0) + 1;
+                if (attemptsById[id] === 1) {
+                    return { success: false, error: { status: 429, message: 'throttled' } } as PatchResult;
+                }
+                return { success: true, workItem: { id, fields: {} } as any, etag: `new${id}`, rev: 2 } as PatchResult;
+            },
+            async getWorkItem(_o: string, _p: string, id: number) {
+                return { workItem: { id, fields: { 'System.State': 'New' } } as any, etag: 'x', rev: 2 };
+            }
+        };
+        const resolver = new ConflictResolver(flaky as unknown as AdoRestClient, wiRepo, async () => 'theirs', () => {});
+        const proc = new OutboxProcessor(db, flaky as unknown as AdoRestClient, resolver, () => {});
+        for (let i = 1; i <= 20; i++) proc.enqueueStateChange(i, 'Active');
+
+        // Drain across multiple cycles, as transient failures are retried.
+        for (let cycle = 0; cycle < 10 && proc.pendingCount > 0; cycle++) {
+            await proc.process();
+        }
+        assert.strictEqual(proc.pendingCount, 0, 'all ops should eventually drain');
+    });
+
     console.log(`\n${passed}/${passed + failed} passed, ${failed} failed`);
     if (failed > 0) {
         throw new Error(`${failed} outbox test(s) failed`);

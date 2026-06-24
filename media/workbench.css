@@ -104,6 +104,12 @@ body {
     background: var(--vscode-list-hoverBackground);
 }
 
+.task-row:focus {
+    outline: none;
+    background: var(--vscode-list-activeSelectionBackground, var(--vscode-list-hoverBackground));
+    box-shadow: inset 2px 0 0 var(--accent);
+}
+
 .task-row.completing {
     opacity: 0;
     transform: translateX(8px);

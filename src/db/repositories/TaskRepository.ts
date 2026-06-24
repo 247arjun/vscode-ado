@@ -80,6 +80,14 @@ export class TaskRepository {
             .sort((a, b) => (a.whenDate ?? a.deadline ?? '').localeCompare(b.whenDate ?? b.deadline ?? ''));
     }
 
+    /** DERIVED: active tasks whose deadline is in the past. */
+    getOverdue(): Task[] {
+        const today = todayIso();
+        return this.active()
+            .filter(t => t.deadline !== undefined && t.deadline < today)
+            .sort((a, b) => (a.deadline ?? '').localeCompare(b.deadline ?? ''));
+    }
+
     private nextSortOrder(list: ListName): number {
         const existing = this.active().filter(t => t.list === list);
         if (existing.length === 0) return 1;

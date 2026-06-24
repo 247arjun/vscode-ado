@@ -228,6 +228,41 @@ export async function activate(context: vscode.ExtensionContext) {
         })
     );
 
+    // ── Phase 6: hardening — reset DB + overdue notifications ─────────
+    context.subscriptions.push(
+        vscode.commands.registerCommand('adoThings.resetDatabase', async () => {
+            const confirm = await vscode.window.showWarningMessage(
+                'Reset the local ADO Things database? All local tasks, tags, projects, and cached items will be permanently deleted. This cannot be undone.',
+                { modal: true },
+                'Reset'
+            );
+            if (confirm === 'Reset') {
+                database?.reset();
+                undoStack.clear();
+                navigatorProvider?.refresh();
+                workbench?.postSnapshot();
+                treeProvider?.forceRefresh();
+                vscode.window.showInformationMessage('Local database has been reset.');
+            }
+        })
+    );
+
+    // Notify once per day about overdue items.
+    const notifyOverdue = () => {
+        const overdue = taskRepo.getOverdue();
+        if (overdue.length === 0) return;
+        const todayKey = new Date().toISOString().slice(0, 10);
+        const lastNotified = context.globalState.get<string>('adoThings.lastOverdueNotice');
+        if (lastNotified === todayKey) return;
+        void context.globalState.update('adoThings.lastOverdueNotice', todayKey);
+        void vscode.window.showWarningMessage(
+            `You have ${overdue.length} overdue ${overdue.length === 1 ? 'task' : 'tasks'}.`,
+            'Show Today'
+        ).then(choice => {
+            if (choice === 'Show Today') workbench?.openView('today');
+        });
+    };
+
     // ── Refresh commands ─────────────────────────────────────────────
 
     context.subscriptions.push(
@@ -602,6 +637,8 @@ export async function activate(context: vscode.ExtensionContext) {
     treeProvider.refresh();
     // Background pull (non-blocking) once the view is up.
     runPull();
+    // Surface overdue items shortly after startup.
+    setTimeout(notifyOverdue, 1500);
 }
 
 // ─── Helper functions ────────────────────────────────────────────────
