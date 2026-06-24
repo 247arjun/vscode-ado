@@ -1,0 +1,190 @@
+// @ts-nocheck
+/* ADO Things — webview SPA (vanilla, no framework).
+   Pure view: sends INTENTS, renders STATE. No DB, no network here. */
+(function () {
+    const vscode = acquireVsCodeApi();
+
+    let currentView = 'today';
+
+    const els = {
+        title: document.getElementById('view-title'),
+        subtitle: document.getElementById('view-subtitle'),
+        banner: document.getElementById('sync-banner'),
+        quickInput: document.getElementById('quick-add-input'),
+        list: document.getElementById('list'),
+        empty: document.getElementById('empty-state')
+    };
+
+    const EMPTY_MESSAGES = {
+        inbox: 'Your Inbox is clear.',
+        today: 'Nothing for Today.',
+        upcoming: 'Nothing scheduled.',
+        anytime: 'Nothing here yet.',
+        someday: 'Someday, maybe.',
+        logbook: 'No completed items yet.'
+    };
+
+    function send(msg) {
+        vscode.postMessage(msg);
+    }
+
+    function el(tag, className, text) {
+        const node = document.createElement(tag);
+        if (className) node.className = className;
+        if (text !== undefined) node.textContent = text;
+        return node;
+    }
+
+    function isOverdue(iso) {
+        if (!iso) return false;
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        return new Date(iso + 'T00:00:00') < today;
+    }
+
+    function renderTask(task) {
+        const row = el('div', 'task-row' + (task.completed ? ' done' : ''));
+        row.dataset.uuid = task.uuid;
+
+        // Circular checkbox
+        const checkbox = el('div', 'checkbox' + (task.completed ? ' checked' : ''));
+        checkbox.setAttribute('role', 'checkbox');
+        checkbox.setAttribute('aria-checked', String(task.completed));
+        checkbox.title = task.completed ? 'Mark as not done' : 'Complete';
+        checkbox.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (task.completed) {
+                send({ type: 'uncompleteTask', uuid: task.uuid });
+            } else {
+                // Satisfying completion: animate, then tell the host.
+                checkbox.classList.add('checked');
+                row.classList.add('completing');
+                setTimeout(() => send({ type: 'completeTask', uuid: task.uuid }), 240);
+            }
+        });
+        row.appendChild(checkbox);
+
+        // Title + metadata
+        const main = el('div', 'task-main');
+        const title = el('div', 'task-title', task.title);
+        main.appendChild(title);
+
+        const meta = el('div', 'task-meta');
+        if (task.type) {
+            meta.appendChild(el('span', 'type-glyph', task.type));
+        }
+        if (task.state) {
+            meta.appendChild(el('span', 'chip state', task.state));
+        }
+        if (task.whenDate) {
+            meta.appendChild(el('span', 'chip date', '↪ ' + task.whenDate));
+        }
+        if (task.deadline) {
+            const chip = el('span', 'chip date' + (isOverdue(task.deadline) ? ' overdue' : ''), '⚑ ' + task.deadline);
+            meta.appendChild(chip);
+        }
+        if (task.adoId) {
+            const ado = el('span', 'chip ado', '#' + task.adoId);
+            ado.title = 'Open in browser';
+            ado.addEventListener('click', (e) => {
+                e.stopPropagation();
+                send({ type: 'openWorkItem', adoId: task.adoId });
+            });
+            meta.appendChild(ado);
+        }
+        for (const tag of task.tags || []) {
+            meta.appendChild(el('span', 'chip', tag));
+        }
+        if (meta.childNodes.length > 0) {
+            main.appendChild(meta);
+        }
+        row.appendChild(main);
+
+        // Trailing hover actions
+        const actions = el('div', 'task-actions');
+        if (!task.completed) {
+            const star = el('button', 'action-btn', task.today ? '★' : '☆');
+            star.title = 'Move to Today';
+            star.addEventListener('click', (e) => { e.stopPropagation(); send({ type: 'moveToToday', uuid: task.uuid }); });
+            actions.appendChild(star);
+
+            if (task.adoId) {
+                const state = el('button', 'action-btn', '⇄');
+                state.title = 'Change state';
+                state.addEventListener('click', (e) => { e.stopPropagation(); send({ type: 'changeState', uuid: task.uuid }); });
+                actions.appendChild(state);
+            }
+        }
+        row.appendChild(actions);
+
+        return row;
+    }
+
+    function renderSnapshot(snapshot) {
+        currentView = snapshot.view;
+        els.title.textContent = snapshot.title;
+        els.subtitle.textContent = snapshot.subtitle || '';
+
+        els.list.innerHTML = '';
+        let total = 0;
+        for (const group of snapshot.groups) {
+            if (group.header) {
+                els.list.appendChild(el('div', 'group-header', group.header));
+            }
+            for (const task of group.tasks) {
+                els.list.appendChild(renderTask(task));
+                total++;
+            }
+        }
+
+        if (total === 0) {
+            els.empty.textContent = EMPTY_MESSAGES[snapshot.view] || 'Nothing here.';
+            els.empty.classList.remove('hidden');
+        } else {
+            els.empty.classList.add('hidden');
+        }
+
+        // Quick-add is hidden in the read-mostly Logbook.
+        document.getElementById('quick-add').style.display = snapshot.view === 'logbook' ? 'none' : '';
+    }
+
+    function renderSyncStatus(status) {
+        if (status.phase === 'offline') {
+            els.banner.textContent = 'Offline — showing cached data';
+            els.banner.className = 'offline';
+        } else if (status.phase === 'syncing') {
+            els.banner.textContent = 'Syncing…';
+            els.banner.className = '';
+        } else if (status.pendingCount > 0) {
+            els.banner.textContent = status.pendingCount + ' change(s) pending sync';
+            els.banner.className = '';
+        } else {
+            els.banner.className = 'hidden';
+        }
+    }
+
+    // Quick capture: Enter creates a task in the current list's bucket.
+    els.quickInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            const title = els.quickInput.value.trim();
+            if (title) {
+                send({ type: 'createTask', title, view: currentView });
+                els.quickInput.value = '';
+            }
+        }
+    });
+
+    window.addEventListener('message', (event) => {
+        const msg = event.data;
+        switch (msg.type) {
+            case 'snapshot':
+                renderSnapshot(msg.snapshot);
+                break;
+            case 'syncStatus':
+                renderSyncStatus(msg.status);
+                break;
+        }
+    });
+
+    send({ type: 'ready' });
+})();

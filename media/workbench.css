@@ -1,0 +1,221 @@
+/* ADO Things — Things-inspired workbench styling.
+   Uses VS Code theme variables so it adapts to light/dark/high-contrast. */
+
+:root {
+    --row-height: 38px;
+    --column-max: 680px;
+    --accent: var(--vscode-textLink-foreground, #4a90d9);
+    --muted: var(--vscode-descriptionForeground);
+    --overdue: var(--vscode-errorForeground, #e51400);
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    padding: 0;
+    font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+    font-size: 14px;
+    color: var(--vscode-foreground);
+    background: var(--vscode-editor-background);
+    line-height: 1.5;
+}
+
+#app {
+    max-width: var(--column-max);
+    margin: 0 auto;
+    padding: 32px 28px 96px;
+}
+
+#view-header {
+    margin-bottom: 18px;
+}
+
+#view-title {
+    font-size: 28px;
+    font-weight: 600;
+    margin: 0 0 2px;
+    letter-spacing: -0.01em;
+}
+
+#view-subtitle {
+    color: var(--muted);
+    font-size: 13px;
+}
+
+#sync-banner {
+    font-size: 12px;
+    color: var(--muted);
+    padding: 6px 0 10px;
+}
+
+#sync-banner.offline { color: var(--overdue); }
+#sync-banner.hidden { display: none; }
+
+/* Quick capture — the "magic plus" single-line input */
+#quick-add {
+    margin: 6px 0 18px;
+}
+
+#quick-add-input {
+    width: 100%;
+    border: none;
+    border-bottom: 1px solid var(--vscode-input-border, transparent);
+    background: transparent;
+    color: var(--vscode-foreground);
+    font-size: 16px;
+    padding: 8px 2px;
+    outline: none;
+}
+
+#quick-add-input::placeholder {
+    color: var(--muted);
+}
+
+#quick-add-input:focus {
+    border-bottom-color: var(--accent);
+}
+
+/* Group headers (date sections in Upcoming) */
+.group-header {
+    text-transform: uppercase;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    margin: 22px 0 8px;
+}
+
+/* Task rows */
+.task-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    min-height: var(--row-height);
+    padding: 7px 8px;
+    border-radius: 8px;
+    cursor: default;
+    transition: background 0.12s ease, opacity 0.25s ease, transform 0.25s ease;
+}
+
+.task-row:hover {
+    background: var(--vscode-list-hoverBackground);
+}
+
+.task-row.completing {
+    opacity: 0;
+    transform: translateX(8px);
+}
+
+/* The circular checkbox */
+.checkbox {
+    flex: 0 0 auto;
+    width: 18px;
+    height: 18px;
+    margin-top: 2px;
+    border-radius: 50%;
+    border: 1.5px solid var(--vscode-checkbox-border, var(--muted));
+    cursor: pointer;
+    position: relative;
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.checkbox:hover {
+    border-color: var(--accent);
+}
+
+.task-row.done .checkbox,
+.checkbox.checked {
+    background: var(--accent);
+    border-color: var(--accent);
+}
+
+.checkbox.checked::after {
+    content: "";
+    position: absolute;
+    left: 5px;
+    top: 1px;
+    width: 4px;
+    height: 9px;
+    border: solid var(--vscode-editor-background);
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+}
+
+.task-main {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.task-title {
+    word-break: break-word;
+}
+
+.task-row.done .task-title {
+    color: var(--muted);
+    text-decoration: line-through;
+}
+
+.task-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 3px;
+    align-items: center;
+}
+
+.chip {
+    font-size: 11px;
+    padding: 1px 7px;
+    border-radius: 10px;
+    background: var(--vscode-badge-background);
+    color: var(--vscode-badge-foreground);
+}
+
+.chip.date { background: transparent; color: var(--muted); padding-left: 0; }
+.chip.overdue { color: var(--overdue); }
+.chip.ado { background: transparent; color: var(--accent); padding-left: 0; cursor: pointer; }
+.chip.state { background: var(--vscode-badge-background); }
+
+.type-glyph {
+    font-size: 11px;
+    color: var(--muted);
+}
+
+/* Trailing actions revealed on hover */
+.task-actions {
+    flex: 0 0 auto;
+    display: flex;
+    gap: 8px;
+    opacity: 0;
+    transition: opacity 0.12s ease;
+}
+
+.task-row:hover .task-actions {
+    opacity: 1;
+}
+
+.action-btn {
+    background: none;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 12px;
+    padding: 0 2px;
+}
+
+.action-btn:hover { color: var(--accent); }
+
+/* Empty states */
+#empty-state {
+    text-align: center;
+    color: var(--muted);
+    margin-top: 80px;
+    font-size: 15px;
+}
+
+#empty-state.hidden { display: none; }
+
+.hidden { display: none; }

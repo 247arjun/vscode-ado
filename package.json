@@ -28,6 +28,10 @@
     "views": {
       "adoQueries": [
         {
+          "id": "adoThings.navigator",
+          "name": "Tasks"
+        },
+        {
           "id": "adoQueries.results",
           "name": "Query Results"
         }
@@ -108,6 +112,20 @@
       {
         "command": "adoQueries.signIn",
         "title": "Azure DevOps: Sign In"
+      },
+      {
+        "command": "adoThings.open",
+        "title": "ADO Things: Open Tasks Workbench",
+        "icon": "$(window)"
+      },
+      {
+        "command": "adoThings.openList",
+        "title": "ADO Things: Open List"
+      },
+      {
+        "command": "adoThings.quickCapture",
+        "title": "ADO Things: Quick Add Task",
+        "icon": "$(add)"
       }
     ],
     "keybindings": [
@@ -116,10 +134,25 @@
         "key": "ctrl+shift+r",
         "mac": "cmd+shift+r",
         "when": "view.adoQueries.results.visible"
+      },
+      {
+        "command": "adoThings.quickCapture",
+        "key": "ctrl+alt+n",
+        "mac": "cmd+alt+n"
       }
     ],
     "menus": {
       "view/title": [
+        {
+          "command": "adoThings.quickCapture",
+          "when": "view == adoThings.navigator",
+          "group": "navigation"
+        },
+        {
+          "command": "adoThings.open",
+          "when": "view == adoThings.navigator",
+          "group": "navigation"
+        },
         {
           "command": "adoQueries.refresh",
           "when": "view == adoQueries.results",

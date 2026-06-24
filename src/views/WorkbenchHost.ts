@@ -1,0 +1,186 @@
+import * as vscode from 'vscode';
+import { TaskRepository } from '../db/repositories/TaskRepository';
+import { ViewModelBuilder } from './ViewModelBuilder';
+import { ViewId, WebviewToHost, HostToWebview, SyncStatusVM } from './protocol';
+
+function getNonce(): string {
+    let text = '';
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    for (let i = 0; i < 32; i++) {
+        text += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return text;
+}
+
+export interface WorkbenchCallbacks {
+    /** User asked to change a linked work item's ADO state. */
+    onChangeState(uuid: string): Promise<void> | void;
+    /** User asked to open a work item in the browser. */
+    onOpenWorkItem(adoId: number): void;
+    /** Something changed; refresh the navigator counts. */
+    onDataChanged(): void;
+}
+
+/**
+ * Manages the Things-style workbench webview panel (opened as an editor tab).
+ *
+ * The host owns all data/business logic; the webview is a pure view that
+ * exchanges typed messages (see {@link ./protocol}). Strict CSP + nonce.
+ */
+export class WorkbenchHost {
+    private panel: vscode.WebviewPanel | undefined;
+    private currentView: ViewId = 'today';
+    private lastStatus: SyncStatusVM = { phase: 'idle', pendingCount: 0 };
+
+    constructor(
+        private readonly extensionUri: vscode.Uri,
+        private readonly tasks: TaskRepository,
+        private readonly vmBuilder: ViewModelBuilder,
+        private readonly callbacks: WorkbenchCallbacks
+    ) {}
+
+    /** Open (or reveal) the workbench focused on a given view. */
+    openView(view: ViewId): void {
+        this.currentView = view;
+        if (this.panel) {
+            this.panel.reveal(vscode.ViewColumn.Active);
+            this.postSnapshot();
+            return;
+        }
+
+        this.panel = vscode.window.createWebviewPanel(
+            'adoThings.workbench',
+            'ADO Things',
+            vscode.ViewColumn.Active,
+            {
+                enableScripts: true,
+                retainContextWhenHidden: true,
+                localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'media')]
+            }
+        );
+
+        this.panel.webview.html = this.renderHtml(this.panel.webview);
+        this.panel.onDidDispose(() => { this.panel = undefined; });
+        this.panel.webview.onDidReceiveMessage((msg: WebviewToHost) => this.handleMessage(msg));
+    }
+
+    /** Push a fresh snapshot of the current view to the webview. */
+    postSnapshot(): void {
+        if (!this.panel) return;
+        const snapshot = this.vmBuilder.build(this.currentView);
+        this.post({ type: 'snapshot', snapshot });
+        this.post({ type: 'syncStatus', status: this.lastStatus });
+    }
+
+    /** Update the sync status banner in the webview. */
+    setSyncStatus(status: SyncStatusVM): void {
+        this.lastStatus = status;
+        this.post({ type: 'syncStatus', status });
+    }
+
+    private post(msg: HostToWebview): void {
+        this.panel?.webview.postMessage(msg);
+    }
+
+    private async handleMessage(msg: WebviewToHost): Promise<void> {
+        switch (msg.type) {
+            case 'ready':
+                this.postSnapshot();
+                break;
+            case 'loadView':
+                this.currentView = msg.view;
+                this.postSnapshot();
+                break;
+            case 'completeTask':
+                this.tasks.complete(msg.uuid);
+                this.afterMutation();
+                break;
+            case 'uncompleteTask':
+                this.tasks.uncomplete(msg.uuid);
+                this.afterMutation();
+                break;
+            case 'updateTask':
+                this.tasks.update(msg.uuid, msg.patch);
+                this.afterMutation();
+                break;
+            case 'moveToToday':
+                this.tasks.moveToToday(msg.uuid);
+                this.afterMutation();
+                break;
+            case 'setWhen':
+                this.tasks.setWhen(msg.uuid, msg.date);
+                this.afterMutation();
+                break;
+            case 'setDeadline':
+                this.tasks.setDeadline(msg.uuid, msg.date);
+                this.afterMutation();
+                break;
+            case 'createTask': {
+                const list = msg.view === 'someday' ? 'someday' : msg.view === 'anytime' ? 'anytime' : 'inbox';
+                this.tasks.createLocal(msg.title, list);
+                this.afterMutation();
+                break;
+            }
+            case 'changeState':
+                await this.callbacks.onChangeState(msg.uuid);
+                this.afterMutation();
+                break;
+            case 'openWorkItem':
+                this.callbacks.onOpenWorkItem(msg.adoId);
+                break;
+            case 'search': {
+                const tasks = this.tasks.search(msg.query).map(t => this.vmBuilder.toVM(t));
+                this.post({ type: 'searchResults', tasks });
+                break;
+            }
+        }
+    }
+
+    private afterMutation(): void {
+        this.postSnapshot();
+        this.callbacks.onDataChanged();
+    }
+
+    private renderHtml(webview: vscode.Webview): string {
+        const nonce = getNonce();
+        const cssUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'workbench.css'));
+        const jsUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'workbench.js'));
+        const csp = [
+            `default-src 'none'`,
+            `style-src ${webview.cspSource}`,
+            `script-src 'nonce-${nonce}'`,
+            `font-src ${webview.cspSource}`
+        ].join('; ');
+
+        return `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="${csp}" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="${cssUri}" />
+    <title>ADO Things</title>
+</head>
+<body>
+    <div id="app">
+        <header id="view-header">
+            <h1 id="view-title">Today</h1>
+            <div id="view-subtitle"></div>
+        </header>
+        <div id="sync-banner" class="hidden"></div>
+        <div id="quick-add">
+            <input id="quick-add-input" type="text" placeholder="New To-Do" aria-label="New to-do" />
+        </div>
+        <main id="list"></main>
+        <div id="empty-state" class="hidden"></div>
+    </div>
+    <script nonce="${nonce}" src="${jsUri}"></script>
+</body>
+</html>`;
+    }
+
+    dispose(): void {
+        this.panel?.dispose();
+        this.panel = undefined;
+    }
+}

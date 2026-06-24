@@ -11,6 +11,10 @@ import { Database } from './db/Database';
 import { DatabaseDataStore } from './db/DatabaseDataStore';
 import { TokenProvider } from './auth/TokenProvider';
 import { SyncEngine, SyncStatus } from './sync/SyncEngine';
+import { NavigatorProvider } from './views/NavigatorProvider';
+import { WorkbenchHost } from './views/WorkbenchHost';
+import { ViewModelBuilder } from './views/ViewModelBuilder';
+import { ViewId } from './views/protocol';
 
 let treeProvider: AdoTreeProvider | undefined;
 let treeView: vscode.TreeView<AdoTreeItem> | undefined;
@@ -19,6 +23,8 @@ let dataStore: DatabaseDataStore | undefined;
 let tokenProvider: TokenProvider | undefined;
 let syncEngine: SyncEngine | undefined;
 let syncStatusBar: vscode.StatusBarItem | undefined;
+let navigatorProvider: NavigatorProvider | undefined;
+let workbench: WorkbenchHost | undefined;
 
 export async function activate(context: vscode.ExtensionContext) {
     console.log('Azure DevOps Queries extension is now active');
@@ -92,6 +98,88 @@ export async function activate(context: vscode.ExtensionContext) {
     });
 
     context.subscriptions.push(treeView);
+
+    // ── Phase 4: Things-style navigator + workbench ──────────────────
+    const taskRepo = dataStore.taskRepository;
+    const workItemRepo = dataStore.workItemRepository;
+    const vmBuilder = new ViewModelBuilder(taskRepo, workItemRepo);
+
+    navigatorProvider = new NavigatorProvider(taskRepo);
+    const navView = vscode.window.createTreeView('adoThings.navigator', {
+        treeDataProvider: navigatorProvider
+    });
+    context.subscriptions.push(navView);
+
+    workbench = new WorkbenchHost(context.extensionUri, taskRepo, vmBuilder, {
+        onChangeState: (uuid) => changeStateForTask(uuid),
+        onOpenWorkItem: async (adoId) => {
+            const url = await dataStore?.getWorkItemUrl(adoId);
+            if (url) { void vscode.env.openExternal(vscode.Uri.parse(url)); }
+        },
+        onDataChanged: () => navigatorProvider?.refresh()
+    });
+    context.subscriptions.push({ dispose: () => workbench?.dispose() });
+
+    // Sync status feeds both the workbench banner and the navigator counts.
+    syncEngine.onDidChangeStatus((s) => {
+        workbench?.setSyncStatus({ phase: s.phase, pendingCount: s.pendingCount, lastSyncedUtc: s.lastSyncedUtc });
+        navigatorProvider?.refresh();
+        workbench?.postSnapshot();
+    });
+
+    // Change a linked task's ADO state via quick-pick, then enqueue to outbox.
+    const changeStateForTask = async (uuid: string): Promise<void> => {
+        const task = taskRepo.getByUuid(uuid);
+        if (!task?.adoId) {
+            vscode.window.showInformationMessage('This task is local-only (no Azure DevOps work item).');
+            return;
+        }
+        const wi = workItemRepo.getById(task.adoId);
+        const witType = wi?.type;
+        if (!witType) {
+            vscode.window.showWarningMessage('Work item type is unknown — cannot determine valid states.');
+            return;
+        }
+        const states = await adoClient.fetchWorkItemTypeStates(witType, wi?.org, wi?.project);
+        const items = states.filter(s => s.name !== wi?.state).map(s => ({ label: s.name, description: s.category ?? '' }));
+        if (items.length === 0) {
+            vscode.window.showInformationMessage(`No other states available for "${witType}".`);
+            return;
+        }
+        const picked = await vscode.window.showQuickPick(items, {
+            placeHolder: `Change #${task.adoId} from "${wi?.state}" to...`
+        });
+        if (!picked) return;
+        await syncEngine?.enqueueStateChange(task.adoId, picked.label);
+    };
+
+    // Open the workbench focused on a given list.
+    context.subscriptions.push(
+        vscode.commands.registerCommand('adoThings.openList', (view?: ViewId) => {
+            workbench?.openView(view ?? 'today');
+        })
+    );
+    context.subscriptions.push(
+        vscode.commands.registerCommand('adoThings.open', () => {
+            workbench?.openView('today');
+        })
+    );
+
+    // Quick capture: type a title -> lands in Inbox. Works from anywhere.
+    context.subscriptions.push(
+        vscode.commands.registerCommand('adoThings.quickCapture', async () => {
+            const title = await vscode.window.showInputBox({
+                prompt: 'New To-Do',
+                placeHolder: 'What do you need to do?'
+            });
+            if (title && title.trim()) {
+                taskRepo.createLocal(title.trim(), 'inbox');
+                navigatorProvider?.refresh();
+                workbench?.postSnapshot();
+                vscode.window.setStatusBarMessage(`Added to Inbox: ${title.trim()}`, 2000);
+            }
+        })
+    );
 
     // ── Refresh commands ─────────────────────────────────────────────
 
