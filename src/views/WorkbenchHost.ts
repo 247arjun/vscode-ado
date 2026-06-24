@@ -170,7 +170,7 @@ export class WorkbenchHost {
                 this.openDetailUuid = undefined;
                 break;
             case 'updateField':
-                await this.callbacks.onUpdateField(msg.uuid, msg.ref, msg.value);
+                await this.callbacks.onUpdateField(msg.uuid, msg.ref, this.normalizeFieldValue(msg.ref, msg.value));
                 this.afterMutation();
                 this.reopenDetail(msg.uuid);
                 break;
@@ -199,6 +199,24 @@ export class WorkbenchHost {
     /** Refresh the currently open detail pane (e.g. after a settings change). */
     refreshOpenDetail(): void {
         if (this.openDetailUuid) this.reopenDetail(this.openDetailUuid);
+    }
+
+    /**
+     * Normalize an inbound field value before it is pushed to ADO.
+     * Description is edited as plaintext but stored as HTML in ADO, so we escape
+     * it and preserve line breaks.
+     */
+    private normalizeFieldValue(ref: string, value: unknown): unknown {
+        if (ref === 'System.Description' && typeof value === 'string') {
+            if (value.trim() === '') return '';
+            const escaped = value
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/\r\n|\r|\n/g, '<br>');
+            return `<div>${escaped}</div>`;
+        }
+        return value;
     }
 
     /** Create a task from a quick-entry line, applying #tags and today/tomorrow. */

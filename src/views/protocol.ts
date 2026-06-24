@@ -84,6 +84,8 @@ export interface TaskDetailVM {
     notes: string;
     /** ADO rich-text description (HTML), if any. */
     description?: string;
+    /** True when the description can be edited (plaintext) and pushed to ADO. */
+    descriptionEditable?: boolean;
     /** Ordered, present-only metadata fields for display. */
     fields: DetailField[];
     url?: string;

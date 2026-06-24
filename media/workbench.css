@@ -314,6 +314,14 @@ body {
     gap: 4px;
 }
 
+.description-edit {
+    width: 100%;
+    box-sizing: border-box;
+    resize: vertical;
+    font-family: inherit;
+    line-height: 1.5;
+}
+
 .assign-me {
     align-self: flex-start;
     font-size: 11px;

@@ -183,8 +183,24 @@
         els.detailTitle.textContent = (detail.adoId ? '#' + detail.adoId + ' ' : '') + detail.title;
         els.detailSubtitle.textContent = [detail.type, detail.state].filter(Boolean).join(' · ');
 
-        // ADO description (rendered as safe plain text for Slice 1).
-        if (detail.description) {
+        // ADO description (plaintext-editable for ADO-linked tasks).
+        if (detail.descriptionEditable) {
+            els.detailDescription.innerHTML = '';
+            const ta = document.createElement('textarea');
+            ta.className = 'detail-input description-edit';
+            ta.rows = 5;
+            ta.placeholder = 'Add a description…';
+            ta.value = detail.description ? htmlToText(detail.description) : '';
+            let original = ta.value;
+            ta.addEventListener('blur', () => {
+                if (ta.value !== original) {
+                    original = ta.value;
+                    send({ type: 'updateField', uuid: detail.uuid, ref: 'System.Description', value: ta.value });
+                }
+            });
+            els.detailDescription.appendChild(ta);
+            els.detailDescription.classList.remove('hidden');
+        } else if (detail.description) {
             els.detailDescription.textContent = htmlToText(detail.description);
             els.detailDescription.classList.remove('hidden');
         } else {

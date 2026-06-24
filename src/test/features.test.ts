@@ -188,6 +188,26 @@ export async function runTests(): Promise<void> {
         assert.strictEqual(assignee.editValue, 'ada@contoso.com'); // edit by email
     });
 
+    await test('Description is editable for ADO tasks, not for local-only', async () => {
+        const db = await Database.openInMemory();
+        const tasks = new TaskRepository(db);
+        const wi = new WorkItemRepository(db);
+        wi.upsert(workItemRowFromAdo(70, {
+            'System.Title': 'Z', 'System.State': 'Active', 'System.WorkItemType': 'Task',
+            'System.Description': '<div>Hello</div>'
+        }, 1, 'Org', 'Proj'));
+        tasks.reconcileFromWorkItem(70, 'Z', 'Active');
+        const builder = new ViewModelBuilder(tasks, wi, new TagRepository(db));
+        const adoTask = tasks.getByAdoId(70)!;
+        const adoDetail = builder.buildDetail(adoTask.uuid, ['System.Description'])!;
+        assert.strictEqual(adoDetail.descriptionEditable, true);
+        assert.ok(adoDetail.description && adoDetail.description.includes('Hello'));
+
+        const local = tasks.createLocal('local one');
+        const localDetail = builder.buildDetail(local.uuid, ['System.Description'])!;
+        assert.notStrictEqual(localDetail.descriptionEditable, true);
+    });
+
     console.log(`\n${passed}/${passed + failed} passed, ${failed} failed`);
     if (failed > 0) {
         throw new Error(`${failed} phase-5 test(s) failed`);

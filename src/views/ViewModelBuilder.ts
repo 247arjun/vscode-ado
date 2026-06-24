@@ -126,6 +126,8 @@ export class ViewModelBuilder {
             if (def.key === 'System.Description') {
                 const desc = f['System.Description'];
                 if (typeof desc === 'string' && desc.trim()) detail.description = desc;
+                // Editable (plaintext) only for ADO-linked tasks.
+                if (task.adoId !== undefined) detail.descriptionEditable = true;
                 continue;
             }
 
