@@ -19,6 +19,7 @@ import { TagRepository } from './db/repositories/TagRepository';
 import { ProjectRepository } from './db/repositories/ProjectRepository';
 import { UndoStack } from './undo/UndoStack';
 import { parseQuickEntry } from './views/quickEntry';
+import { DETAIL_FIELD_CATALOG, DEFAULT_DETAIL_KEYS } from './views/detailFields';
 
 let treeProvider: AdoTreeProvider | undefined;
 let treeView: vscode.TreeView<AdoTreeItem> | undefined;
@@ -326,6 +327,46 @@ export async function activate(context: vscode.ExtensionContext) {
                 workbench?.postSnapshot();
                 treeProvider?.forceRefresh();
                 vscode.window.showInformationMessage('Local database has been reset.');
+            }
+        })
+    );
+
+    // Guided picker: choose which fields appear in the task detail pane.
+    context.subscriptions.push(
+        vscode.commands.registerCommand('adoThings.configureDetailFields', async () => {
+            const current = Settings.detailFields;
+            const selectedKeys = new Set(current.length > 0 ? current : DEFAULT_DETAIL_KEYS);
+            const picks = DETAIL_FIELD_CATALOG.map(def => ({
+                label: def.label,
+                description: def.editable ? '$(edit) editable' : (def.source === 'local' ? 'local' : 'read-only'),
+                detail: def.key,
+                picked: selectedKeys.has(def.key)
+            }));
+            const chosen = await vscode.window.showQuickPick(picks, {
+                canPickMany: true,
+                title: 'Detail pane fields',
+                placeHolder: 'Select which fields to show in the task detail pane'
+            });
+            if (!chosen) return; // cancelled
+
+            // Preserve catalog order for a stable layout.
+            const chosenKeys = new Set(chosen.map(c => c.detail));
+            const ordered = DETAIL_FIELD_CATALOG.filter(d => chosenKeys.has(d.key)).map(d => d.key);
+
+            const target = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0
+                ? vscode.ConfigurationTarget.Workspace
+                : vscode.ConfigurationTarget.Global;
+            await vscode.workspace.getConfiguration('adoQueries').update('detailFields', ordered, target);
+            workbench?.postSnapshot();
+            vscode.window.showInformationMessage(`Detail pane will show ${ordered.length} field(s).`);
+        })
+    );
+
+    // Live-refresh the open detail pane when the field selection changes.
+    context.subscriptions.push(
+        vscode.workspace.onDidChangeConfiguration(e => {
+            if (e.affectsConfiguration('adoQueries.detailFields')) {
+                workbench?.refreshOpenDetail();
             }
         })
     );

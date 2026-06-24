@@ -150,6 +150,11 @@
       {
         "command": "adoThings.pushToAdo",
         "title": "ADO Things: Push Task to Azure DevOps"
+      },
+      {
+        "command": "adoThings.configureDetailFields",
+        "title": "ADO Things: Choose Detail Pane Fields",
+        "icon": "$(settings-gear)"
       }
     ],
     "keybindings": [
@@ -181,6 +186,11 @@
           "command": "adoThings.open",
           "when": "view == adoThings.navigator",
           "group": "navigation"
+        },
+        {
+          "command": "adoThings.configureDetailFields",
+          "when": "view == adoThings.navigator",
+          "group": "1_config"
         },
         {
           "command": "adoQueries.refresh",

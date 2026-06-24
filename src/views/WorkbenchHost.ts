@@ -39,6 +39,7 @@ export class WorkbenchHost {
     private panel: vscode.WebviewPanel | undefined;
     private currentView: ViewId = 'today';
     private lastStatus: SyncStatusVM = { phase: 'idle', pendingCount: 0 };
+    private openDetailUuid: string | undefined;
 
     constructor(
         private readonly extensionUri: vscode.Uri,
@@ -150,10 +151,14 @@ export class WorkbenchHost {
                 this.callbacks.onOpenWorkItem(msg.adoId);
                 break;
             case 'openTask': {
+                this.openDetailUuid = msg.uuid;
                 const detail = this.vmBuilder.buildDetail(msg.uuid, Settings.detailFields);
                 if (detail) this.post({ type: 'taskDetail', detail });
                 break;
             }
+            case 'closeTask':
+                this.openDetailUuid = undefined;
+                break;
             case 'updateField':
                 await this.callbacks.onUpdateField(msg.uuid, msg.ref, msg.value);
                 this.afterMutation();
@@ -176,6 +181,11 @@ export class WorkbenchHost {
     private reopenDetail(uuid: string): void {
         const detail = this.vmBuilder.buildDetail(uuid, Settings.detailFields);
         if (detail) this.post({ type: 'taskDetail', detail });
+    }
+
+    /** Refresh the currently open detail pane (e.g. after a settings change). */
+    refreshOpenDetail(): void {
+        if (this.openDetailUuid) this.reopenDetail(this.openDetailUuid);
     }
 
     /** Create a task from a quick-entry line, applying #tags and today/tomorrow. */

@@ -219,6 +219,7 @@
 
     function closeDetail() {
         els.detail.classList.add('hidden');
+        send({ type: 'closeTask' });
     }
 
     // Render a detail field as a static value or an editable control.

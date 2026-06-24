@@ -102,6 +102,7 @@ export type WebviewToHost =
     | { type: 'changeState'; uuid: string }
     | { type: 'pushToAdo'; uuid: string }
     | { type: 'openTask'; uuid: string }
+    | { type: 'closeTask' }
     | { type: 'updateField'; uuid: string; ref: string; value: unknown }
     | { type: 'search'; query: string };
 
