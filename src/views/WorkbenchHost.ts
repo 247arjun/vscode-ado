@@ -148,6 +148,7 @@ export class WorkbenchHost {
             case 'changeState':
                 await this.callbacks.onChangeState(msg.uuid);
                 this.afterMutation();
+                this.reopenDetail(msg.uuid);
                 break;
             case 'pushToAdo':
                 await this.callbacks.onPushToAdo(msg.uuid);

@@ -225,6 +225,19 @@
     // Render a detail field as a static value or an editable control.
     function renderFieldValue(detail, field) {
         const dd = el('dd');
+
+        // Fields with a discrete action (e.g. State -> transition picker).
+        if (field.action === 'changeState') {
+            const wrap = el('div', 'identity-edit');
+            wrap.appendChild(el('span', null, field.value || '—'));
+            const btn = el('button', 'action-btn assign-me', 'Change…');
+            btn.title = 'Change state';
+            btn.addEventListener('click', () => send({ type: 'changeState', uuid: detail.uuid }));
+            wrap.appendChild(btn);
+            dd.appendChild(wrap);
+            return dd;
+        }
+
         if (!field.editable) {
             dd.textContent = field.value || '—';
             return dd;

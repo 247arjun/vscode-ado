@@ -69,6 +69,8 @@ export interface DetailField {
     options?: string[];
     /** Raw value bound to the editor control (e.g. YYYY-MM-DD for dates). */
     editValue?: string;
+    /** A non-inline action this field offers (e.g. State opens a transition picker). */
+    action?: 'changeState';
 }
 
 /** Full read-only detail for one task (rich ADO fields + local fields). */

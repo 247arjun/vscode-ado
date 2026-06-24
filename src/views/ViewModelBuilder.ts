@@ -158,7 +158,10 @@ export class ViewModelBuilder {
                 control: def.control,
                 editable,
                 options: def.options,
-                editValue
+                editValue,
+                // State changes go through a transition picker (valid states are
+                // type-specific), surfaced as a "Change…" action on the row.
+                action: def.key === 'System.State' && task.adoId !== undefined ? 'changeState' : undefined
             });
         }
 
