@@ -4,6 +4,7 @@ import { TagRepository } from '../db/repositories/TagRepository';
 import { ViewModelBuilder } from './ViewModelBuilder';
 import { parseQuickEntry } from './quickEntry';
 import { UndoStack } from '../undo/UndoStack';
+import { Settings } from '../config/Settings';
 import { ViewId, WebviewToHost, HostToWebview, SyncStatusVM } from './protocol';
 
 function getNonce(): string {
@@ -22,6 +23,8 @@ export interface WorkbenchCallbacks {
     onOpenWorkItem(adoId: number): void;
     /** User asked to push a local-only task to ADO as a new work item. */
     onPushToAdo(uuid: string): Promise<void> | void;
+    /** User edited an ADO field in the detail pane. */
+    onUpdateField(uuid: string, ref: string, value: unknown): Promise<void> | void;
     /** Something changed; refresh the navigator counts. */
     onDataChanged(): void;
 }
@@ -123,10 +126,12 @@ export class WorkbenchHost {
             case 'setWhen':
                 this.tasks.setWhen(msg.uuid, msg.date);
                 this.afterMutation();
+                this.reopenDetail(msg.uuid);
                 break;
             case 'setDeadline':
                 this.tasks.setDeadline(msg.uuid, msg.date);
                 this.afterMutation();
+                this.reopenDetail(msg.uuid);
                 break;
             case 'createTask': {
                 this.createFromQuickEntry(msg.title, msg.view);
@@ -145,10 +150,15 @@ export class WorkbenchHost {
                 this.callbacks.onOpenWorkItem(msg.adoId);
                 break;
             case 'openTask': {
-                const detail = this.vmBuilder.buildDetail(msg.uuid);
+                const detail = this.vmBuilder.buildDetail(msg.uuid, Settings.detailFields);
                 if (detail) this.post({ type: 'taskDetail', detail });
                 break;
             }
+            case 'updateField':
+                await this.callbacks.onUpdateField(msg.uuid, msg.ref, msg.value);
+                this.afterMutation();
+                this.reopenDetail(msg.uuid);
+                break;
             case 'search': {
                 const tasks = this.tasks.search(msg.query).map(t => this.vmBuilder.toVM(t));
                 this.post({ type: 'searchResults', tasks });
@@ -160,6 +170,12 @@ export class WorkbenchHost {
     private afterMutation(): void {
         this.postSnapshot();
         this.callbacks.onDataChanged();
+    }
+
+    /** Re-send the detail snapshot so edited values reflect immediately. */
+    private reopenDetail(uuid: string): void {
+        const detail = this.vmBuilder.buildDetail(uuid, Settings.detailFields);
+        if (detail) this.post({ type: 'taskDetail', detail });
     }
 
     /** Create a task from a quick-entry line, applying #tags and today/tomorrow. */

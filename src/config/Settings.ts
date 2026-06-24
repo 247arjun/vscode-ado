@@ -100,6 +100,14 @@ export class Settings {
         return this.getConfig().get<number>('refreshIntervalSeconds', 0);
     }
 
+    /**
+     * Field keys to surface in the task detail pane, in order.
+     * Empty array = use the built-in default set.
+     */
+    static get detailFields(): string[] {
+        return this.getConfig().get<string[]>('detailFields', []);
+    }
+
     static get cacheTtlSeconds(): number {
         return this.getConfig().get<number>('cacheTtlSeconds', 30);
     }

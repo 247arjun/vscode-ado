@@ -148,6 +148,27 @@ export async function runTests(): Promise<void> {
         assert.ok(detail.fields.some(f => f.value.includes('Local-only')));
     });
 
+    await test('buildDetail honors a custom field list and marks editability', async () => {
+        const db = await Database.openInMemory();
+        const tasks = new TaskRepository(db);
+        const wi = new WorkItemRepository(db);
+        wi.upsert(workItemRowFromAdo(50, {
+            'System.Title': 'X', 'System.State': 'Active', 'System.WorkItemType': 'Task',
+            'Microsoft.VSTS.Common.Priority': 2, 'System.AssignedTo': { displayName: 'Bob' }
+        }, 1, 'Org', 'Proj'));
+        tasks.reconcileFromWorkItem(50, 'X', 'Active');
+        const builder = new ViewModelBuilder(tasks, wi, new TagRepository(db));
+        const t = tasks.getByAdoId(50)!;
+        // Only Priority + AssignedTo, in that order.
+        const detail = builder.buildDetail(t.uuid, ['Microsoft.VSTS.Common.Priority', 'System.AssignedTo'])!;
+        assert.strictEqual(detail.fields.length, 2);
+        assert.strictEqual(detail.fields[0].label, 'Priority');
+        assert.strictEqual(detail.fields[0].editable, true);
+        assert.strictEqual(detail.fields[0].editValue, '2');
+        assert.strictEqual(detail.fields[1].label, 'Assigned To');
+        assert.strictEqual(detail.fields[1].editable, false);
+    });
+
     console.log(`\n${passed}/${passed + failed} passed, ${failed} failed`);
     if (failed > 0) {
         throw new Error(`${failed} phase-5 test(s) failed`);

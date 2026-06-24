@@ -113,6 +113,36 @@ export async function runTests(): Promise<void> {
         assert.strictEqual(proc.pendingCount, 1, 'op should remain pending for retry');
     });
 
+    await test('update_fields op pushes a field and updates the mirror', async () => {
+        const db = await Database.openInMemory();
+        seedWorkItem(db);
+        const rest = new FakeRest();
+        rest.patchResults = [{ success: true, workItem: { id: 55, fields: {} } as any, etag: 'etag-7', rev: 4 }];
+        const resolver = new ConflictResolver(rest as unknown as AdoRestClient, new WorkItemRepository(db), async () => 'theirs', () => {});
+        const proc = new OutboxProcessor(db, rest as unknown as AdoRestClient, resolver, () => {});
+        proc.enqueueFieldUpdate(55, 'Microsoft.VSTS.Common.Priority', 1);
+        assert.strictEqual(proc.pendingCount, 1);
+        await proc.process();
+        assert.strictEqual(proc.pendingCount, 0);
+        const wi = new WorkItemRepository(db).getById(55)!;
+        assert.strictEqual(wi.fields['Microsoft.VSTS.Common.Priority'], 1);
+        assert.strictEqual(wi.etag, 'etag-7');
+    });
+
+    await test('update_fields with empty value clears the field', async () => {
+        const db = await Database.openInMemory();
+        seedWorkItem(db);
+        const rest = new FakeRest();
+        rest.patchResults = [{ success: true, workItem: { id: 55, fields: {} } as any, etag: 'etag-8', rev: 5 }];
+        const resolver = new ConflictResolver(rest as unknown as AdoRestClient, new WorkItemRepository(db), async () => 'theirs', () => {});
+        const proc = new OutboxProcessor(db, rest as unknown as AdoRestClient, resolver, () => {});
+        const wiRepo = new WorkItemRepository(db);
+        wiRepo.getById(55)!.fields['Microsoft.VSTS.Common.Priority'] = 2;
+        proc.enqueueFieldUpdate(55, 'Microsoft.VSTS.Common.Priority', '');
+        await proc.process();
+        assert.strictEqual(wiRepo.getById(55)!.fields['Microsoft.VSTS.Common.Priority'], undefined);
+    });
+
     await test('create_work_item op creates and links a new ADO work item', async () => {
         const db = await Database.openInMemory();
         const tasks = new TaskRepository(db);

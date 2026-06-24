@@ -49,6 +49,18 @@ export class OutboxProcessor {
         });
     }
 
+    /** Enqueue a single-field ADO update (optimistic). value === null clears it. */
+    enqueueFieldUpdate(adoId: number, field: string, value: unknown): void {
+        const row = this.workItems.getById(adoId);
+        this.queue.enqueue({
+            entity: 'workitem',
+            targetId: String(adoId),
+            opType: 'update_fields',
+            payload: { field, value },
+            baseEtag: row?.etag
+        });
+    }
+
     /** Enqueue creation of a brand-new ADO work item from a local task. */
     enqueueCreate(taskUuid: string, type: string, org: string, project: string, title: string): void {
         this.queue.enqueue({
@@ -76,6 +88,10 @@ export class OutboxProcessor {
     private async processOne(op: SyncOp): Promise<void> {
         if (op.opType === 'create_work_item') {
             await this.processCreate(op);
+            return;
+        }
+        if (op.opType === 'update_fields') {
+            await this.processFieldUpdate(op);
             return;
         }
         if (op.opType !== 'update_state') {
@@ -192,6 +208,80 @@ export class OutboxProcessor {
         } else {
             this.queue.setStatus(op.opId, 'pending', result.error?.message);
             this.log(`Transient failure creating "${title}" (attempt ${attempts}): ${result.error?.message}`);
+        }
+    }
+
+    /** Apply a single-field update to an existing ADO work item. */
+    private async processFieldUpdate(op: SyncOp): Promise<void> {
+        const adoId = Number(op.targetId);
+        const row = this.workItems.getById(adoId);
+        const org = row?.org;
+        const project = row?.project;
+        if (!org || !project) {
+            this.queue.setStatus(op.opId, 'failed', 'Missing org/project for work item');
+            return;
+        }
+
+        const field = String(op.payload['field']);
+        const value = op.payload['value'];
+        const cleared = value === null || value === undefined || value === '';
+        const ops: JsonPatchOp[] = cleared
+            ? [{ op: 'remove', path: `/fields/${field}` }]
+            : [{ op: 'add', path: `/fields/${field}`, value }];
+
+        const applyLocal = () => {
+            const updated = this.workItems.getById(adoId);
+            if (updated) {
+                if (cleared) delete updated.fields[field];
+                else updated.fields[field] = value;
+                if (field === 'System.State') updated.state = cleared ? undefined : String(value);
+            }
+            if (field === 'System.State' || field === 'System.Title') {
+                const title = typeof updated?.fields['System.Title'] === 'string' ? (updated.fields['System.Title'] as string) : `#${adoId}`;
+                const state = typeof updated?.fields['System.State'] === 'string' ? (updated.fields['System.State'] as string) : undefined;
+                this.tasks.reconcileFromWorkItem(adoId, title, state);
+            }
+        };
+
+        this.queue.setStatus(op.opId, 'inflight');
+        const result = await this.rest.patchWorkItem(org, project, adoId, ops, op.baseEtag);
+
+        if (result.success) {
+            if (result.etag && result.rev !== undefined) this.workItems.setEtag(adoId, result.etag, result.rev);
+            applyLocal();
+            this.queue.setStatus(op.opId, 'done');
+            this.log(`Pushed #${adoId} ${field} = ${cleared ? '(cleared)' : String(value)}`);
+            return;
+        }
+
+        if (result.conflict) {
+            const outcome = await this.conflicts.resolveFieldConflict(op, org, project, field, value);
+            if (outcome.resolved) {
+                this.queue.setStatus(op.opId, 'done');
+                return;
+            }
+            if (outcome.retryWithEtag) {
+                this.queue.updateBaseEtag(op.opId, outcome.retryWithEtag);
+                const retry = await this.rest.patchWorkItem(org, project, adoId, ops, outcome.retryWithEtag);
+                if (retry.success) {
+                    if (retry.etag && retry.rev !== undefined) this.workItems.setEtag(adoId, retry.etag, retry.rev);
+                    applyLocal();
+                    this.queue.setStatus(op.opId, 'done');
+                    this.log(`Pushed #${adoId} ${field} after conflict merge`);
+                    return;
+                }
+            }
+            this.queue.setStatus(op.opId, 'pending', 'Awaiting conflict resolution');
+            return;
+        }
+
+        const attempts = this.queue.incrementAttempts(op.opId);
+        if (attempts >= MAX_ATTEMPTS) {
+            this.queue.setStatus(op.opId, 'failed', result.error?.message ?? 'Unknown error');
+            this.log(`Giving up on #${adoId} ${field} after ${attempts} attempts: ${result.error?.message}`);
+        } else {
+            this.queue.setStatus(op.opId, 'pending', result.error?.message);
+            this.log(`Transient failure on #${adoId} ${field} (attempt ${attempts}): ${result.error?.message}`);
         }
     }
 }

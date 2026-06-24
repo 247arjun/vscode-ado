@@ -3,6 +3,7 @@ import { WorkItemRepository } from '../db/repositories/WorkItemRepository';
 import { TagRepository } from '../db/repositories/TagRepository';
 import { Task } from '../model/types';
 import { ViewId, TaskVM, ViewSnapshot, TaskGroupVM, TaskDetailVM, DetailField } from './protocol';
+import { resolveDetailFields } from './detailFields';
 
 const VIEW_TITLES: Record<string, string> = {
     inbox: 'Inbox',
@@ -95,8 +96,8 @@ export class ViewModelBuilder {
         return { view, title: VIEW_TITLES[listName] ?? 'Tasks', groups: [{ tasks }] };
     }
 
-    /** Build the read-only detail for a single task (rich ADO + local fields). */
-    buildDetail(uuid: string): TaskDetailVM | undefined {
+    /** Build the detail for a single task, honoring the configured field set. */
+    buildDetail(uuid: string, configKeys?: string[]): TaskDetailVM | undefined {
         const task = this.tasks.getByUuid(uuid);
         if (!task) return undefined;
 
@@ -108,54 +109,90 @@ export class ViewModelBuilder {
             fields: []
         };
 
-        const fields = detail.fields;
+        const defs = resolveDetailFields(configKeys);
         const localTags = this.tags?.namesFor(task.tagIds) ?? [];
+        const wi = task.adoId !== undefined ? this.workItems.getById(task.adoId) : undefined;
+        const f = wi?.fields ?? {};
+        detail.type = wi?.type;
+        detail.state = wi?.state;
+        detail.url = typeof f['_url'] === 'string' ? (f['_url'] as string) : undefined;
 
-        if (task.adoId !== undefined) {
-            const wi = this.workItems.getById(task.adoId);
-            const f = wi?.fields ?? {};
-            detail.type = wi?.type;
-            detail.state = wi?.state;
-
-            const desc = f['System.Description'];
-            if (typeof desc === 'string' && desc.trim()) detail.description = desc;
-
-            const push = (label: string, raw: unknown, kind?: DetailField['kind']) => {
-                const value = this.formatFieldValue(raw, kind);
-                if (value) fields.push({ label, value, kind });
-            };
-
-            push('Type', wi?.type);
-            push('State', wi?.state);
-            push('Reason', f['System.Reason']);
-            push('Assigned To', f['System.AssignedTo'], 'identity');
-            push('Area Path', f['System.AreaPath']);
-            push('Iteration', f['System.IterationPath']);
-            push('Priority', f['Microsoft.VSTS.Common.Priority']);
-            push('Severity', f['Microsoft.VSTS.Common.Severity']);
-            push('Story Points', f['Microsoft.VSTS.Scheduling.StoryPoints']);
-            push('Effort', f['Microsoft.VSTS.Scheduling.Effort']);
-            push('Remaining Work', f['Microsoft.VSTS.Scheduling.RemainingWork']);
-            push('Start Date', f['Microsoft.VSTS.Scheduling.StartDate'], 'date');
-            push('Due Date', f['Microsoft.VSTS.Scheduling.DueDate'], 'date');
-            const adoTags = typeof f['System.Tags'] === 'string' ? (f['System.Tags'] as string) : '';
-            if (adoTags) push('ADO Tags', adoTags.split(';').map(t => t.trim()).filter(Boolean).join(', '));
-            push('Created By', f['System.CreatedBy'], 'identity');
-            push('Created', f['System.CreatedDate'], 'date');
-            push('Changed By', f['System.ChangedBy'], 'identity');
-            push('Changed', f['System.ChangedDate'], 'date');
-
-            detail.url = wi?.fields?.['_url'] && typeof wi.fields['_url'] === 'string' ? (wi.fields['_url'] as string) : undefined;
-        } else {
-            fields.push({ label: 'Source', value: 'Local-only task (not in Azure DevOps)' });
+        if (task.adoId === undefined) {
+            detail.fields.push({ label: 'Source', value: 'Local-only task (not in Azure DevOps)' });
         }
 
-        // Local-only fields always shown.
-        if (task.whenDate) fields.push({ label: 'When', value: task.whenDate, kind: 'date' });
-        if (task.deadline) fields.push({ label: 'Deadline', value: task.deadline, kind: 'date' });
-        if (localTags.length > 0) fields.push({ label: 'Tags', value: localTags.join(', ') });
+        for (const def of defs) {
+            // Description renders in its own block, gated by its key being present.
+            if (def.key === 'System.Description') {
+                const desc = f['System.Description'];
+                if (typeof desc === 'string' && desc.trim()) detail.description = desc;
+                continue;
+            }
+
+            if (def.source === 'local') {
+                this.pushLocalField(detail, def, task, localTags);
+                continue;
+            }
+
+            // ADO field
+            if (task.adoId === undefined) continue; // no ADO data for local tasks
+            const raw = def.ref ? f[def.ref] : undefined;
+            const kind: DetailField['kind'] | undefined =
+                def.control === 'date' ? 'date' : def.control === 'identity' ? 'identity' : undefined;
+            const value = this.formatFieldValue(raw, kind);
+            const editable = def.editable && task.adoId !== undefined;
+            // Always show editable fields (so users can set an empty one); only
+            // skip empty read-only fields to keep the pane tidy.
+            if (!value && !editable) continue;
+            detail.fields.push({
+                label: def.label,
+                value,
+                kind,
+                key: def.key,
+                ref: def.ref,
+                source: 'ado',
+                control: def.control,
+                editable,
+                options: def.options,
+                editValue: this.editValueFor(raw, def.control)
+            });
+        }
 
         return detail;
+    }
+
+    private pushLocalField(detail: TaskDetailVM, def: { key: string; label: string; control: string; editable: boolean }, task: Task, localTags: string[]): void {
+        if (def.key === 'local.when') {
+            detail.fields.push({
+                label: def.label,
+                value: task.whenDate ? this.formatFieldValue(task.whenDate, 'date') : '',
+                kind: 'date', key: def.key, source: 'local', control: 'date', editable: true,
+                editValue: task.whenDate ?? ''
+            });
+        } else if (def.key === 'local.deadline') {
+            detail.fields.push({
+                label: def.label,
+                value: task.deadline ? this.formatFieldValue(task.deadline, 'date') : '',
+                kind: 'date', key: def.key, source: 'local', control: 'date', editable: true,
+                editValue: task.deadline ?? ''
+            });
+        } else if (def.key === 'local.tags') {
+            if (localTags.length > 0) {
+                detail.fields.push({ label: def.label, value: localTags.join(', '), key: def.key, source: 'local', control: 'readonly', editable: false });
+            }
+        }
+    }
+
+    /** Raw value for binding to an editor control. */
+    private editValueFor(raw: unknown, control: string): string {
+        if (raw === null || raw === undefined) return '';
+        if (control === 'date' && typeof raw === 'string') {
+            // ADO dates are ISO datetimes; the <input type=date> wants YYYY-MM-DD.
+            const d = new Date(raw);
+            if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+        }
+        if (typeof raw === 'object') return '';
+        return String(raw);
     }
 
     /** Render an ADO field value to a display string. */

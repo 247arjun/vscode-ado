@@ -43,14 +43,22 @@ export class ConflictResolver {
     ) {}
 
     async resolveStateConflict(op: SyncOp, org: string, project: string): Promise<ConflictOutcome> {
+        return this.resolveFieldConflict(op, org, project, 'System.State', op.payload['state']);
+    }
+
+    /**
+     * Generic same-field conflict resolution for any field reference.
+     * `desired` is the value we tried to write.
+     */
+    async resolveFieldConflict(op: SyncOp, org: string, project: string, fieldRef: string, desired: unknown): Promise<ConflictOutcome> {
         const adoId = Number(op.targetId);
-        const desired = op.payload['state'];
         const fresh = await this.rest.getWorkItem(org, project, adoId);
         if (!fresh) {
             // Can't re-read; leave it pending for a later attempt.
             return {};
         }
 
+        const serverValue = fresh.workItem.fields?.[fieldRef];
         const serverState = fresh.workItem.fields?.['System.State'];
         // Mirror the fresh server truth locally regardless of outcome.
         this.workItems.upsert({
@@ -64,18 +72,18 @@ export class ConflictResolver {
             deleted: 0
         });
 
-        if (serverState === desired) {
-            this.log(`Conflict on #${adoId}: server already at desired state "${desired}" — resolved.`);
+        if (serverValue === desired) {
+            this.log(`Conflict on #${adoId}: server already at desired ${fieldRef} "${String(desired)}" — resolved.`);
             return { resolved: true };
         }
 
         // Same field changed to a different value -> ask the user.
-        const choice = await this.prompt({ adoId, field: 'System.State', mine: desired, theirs: serverState });
+        const choice = await this.prompt({ adoId, field: fieldRef, mine: desired, theirs: serverValue });
         if (choice === 'theirs') {
-            this.log(`Conflict on #${adoId}: kept server value "${String(serverState)}".`);
+            this.log(`Conflict on #${adoId}: kept server value "${String(serverValue)}" for ${fieldRef}.`);
             return { resolved: true };
         }
-        this.log(`Conflict on #${adoId}: keeping local value "${String(desired)}" — retrying with fresh etag.`);
+        this.log(`Conflict on #${adoId}: keeping local value "${String(desired)}" for ${fieldRef} — retrying with fresh etag.`);
         return { retryWithEtag: fresh.etag };
     }
 }

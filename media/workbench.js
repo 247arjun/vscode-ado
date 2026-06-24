@@ -195,7 +195,7 @@
         els.detailFields.innerHTML = '';
         for (const field of detail.fields) {
             els.detailFields.appendChild(el('dt', null, field.label));
-            els.detailFields.appendChild(el('dd', null, field.value));
+            els.detailFields.appendChild(renderFieldValue(detail, field));
         }
 
         // Local notes.
@@ -219,6 +219,61 @@
 
     function closeDetail() {
         els.detail.classList.add('hidden');
+    }
+
+    // Render a detail field as a static value or an editable control.
+    function renderFieldValue(detail, field) {
+        const dd = el('dd');
+        if (!field.editable) {
+            dd.textContent = field.value || '—';
+            return dd;
+        }
+
+        const uuid = detail.uuid;
+        const commit = (value) => {
+            if (field.source === 'local') {
+                if (field.key === 'local.when') send({ type: 'setWhen', uuid, date: value || undefined });
+                else if (field.key === 'local.deadline') send({ type: 'setDeadline', uuid, date: value || undefined });
+            } else {
+                send({ type: 'updateField', uuid, ref: field.ref, value });
+            }
+        };
+
+        let input;
+        if (field.control === 'enum') {
+            input = document.createElement('select');
+            input.className = 'detail-input';
+            const blank = el('option', null, '—');
+            blank.value = '';
+            input.appendChild(blank);
+            for (const opt of field.options || []) {
+                const o = el('option', null, opt);
+                o.value = opt;
+                input.appendChild(o);
+            }
+            input.value = field.editValue || '';
+            input.addEventListener('change', () => commit(input.value));
+        } else if (field.control === 'date') {
+            input = document.createElement('input');
+            input.type = 'date';
+            input.className = 'detail-input';
+            input.value = field.editValue || '';
+            input.addEventListener('change', () => commit(input.value));
+        } else if (field.control === 'number') {
+            input = document.createElement('input');
+            input.type = 'number';
+            input.className = 'detail-input';
+            input.value = field.editValue || '';
+            input.addEventListener('change', () => commit(input.value === '' ? '' : Number(input.value)));
+        } else {
+            input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'detail-input';
+            input.value = field.editValue || '';
+            input.addEventListener('change', () => commit(input.value));
+        }
+        dd.appendChild(input);
+        return dd;
     }
 
     function renderSyncStatus(status) {

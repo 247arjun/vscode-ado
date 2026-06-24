@@ -51,12 +51,24 @@ export interface SyncStatusVM {
     lastSyncedUtc?: string;
 }
 
-/** A single read-only field shown in the task detail pane. */
+/** A single field shown in the task detail pane. */
 export interface DetailField {
     label: string;
+    /** Formatted display value. */
     value: string;
     /** 'html' values are ADO rich text; the webview renders them sanitized. */
     kind?: 'text' | 'html' | 'date' | 'identity';
+    /** Settings/field key (ADO ref name or `local.*`). */
+    key?: string;
+    /** ADO field reference name, when this maps to an ADO field. */
+    ref?: string;
+    source?: 'ado' | 'local';
+    /** Editor control to render; absent/`readonly` = display only. */
+    control?: 'text' | 'date' | 'number' | 'enum' | 'identity' | 'html' | 'readonly';
+    editable?: boolean;
+    options?: string[];
+    /** Raw value bound to the editor control (e.g. YYYY-MM-DD for dates). */
+    editValue?: string;
 }
 
 /** Full read-only detail for one task (rich ADO fields + local fields). */
@@ -90,6 +102,7 @@ export type WebviewToHost =
     | { type: 'changeState'; uuid: string }
     | { type: 'pushToAdo'; uuid: string }
     | { type: 'openTask'; uuid: string }
+    | { type: 'updateField'; uuid: string; ref: string; value: unknown }
     | { type: 'search'; query: string };
 
 /** Host -> Webview */

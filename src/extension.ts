@@ -124,6 +124,14 @@ export async function activate(context: vscode.ExtensionContext) {
             if (url) { void vscode.env.openExternal(vscode.Uri.parse(url)); }
         },
         onPushToAdo: (uuid) => pushTaskToAdo(uuid),
+        onUpdateField: async (uuid, ref, value) => {
+            const task = taskRepo.getByUuid(uuid);
+            if (!task?.adoId) {
+                vscode.window.showInformationMessage('This task is local-only — push it to Azure DevOps before editing ADO fields.');
+                return;
+            }
+            await syncEngine?.enqueueFieldUpdate(task.adoId, ref, value);
+        },
         onDataChanged: () => navigatorProvider?.refresh()
     }, tagRepo, undoStack);
     context.subscriptions.push({ dispose: () => workbench?.dispose() });

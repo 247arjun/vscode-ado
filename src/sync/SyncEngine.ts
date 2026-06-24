@@ -92,6 +92,13 @@ export class SyncEngine {
         await this.processOutbox();
     }
 
+    /** Optimistically enqueue a single-field ADO update and drain the outbox. */
+    async enqueueFieldUpdate(adoId: number, field: string, value: unknown): Promise<void> {
+        this.outbox.enqueueFieldUpdate(adoId, field, value);
+        this.setStatus({ pendingCount: this.outbox.pendingCount });
+        await this.processOutbox();
+    }
+
     /** Create a new ADO work item from a local task, then drain the outbox. */
     async pushTaskToAdo(taskUuid: string, type: string, org: string, project: string): Promise<void> {
         const task = this.tasks.getByUuid(taskUuid);

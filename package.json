@@ -2,7 +2,7 @@
   "name": "azure-devops-queries",
   "displayName": "Azure DevOps Queries",
   "description": "View Azure DevOps queries as a grouped tree in VS Code",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "publisher": "ArjunGopalakrishna",
   "icon": "media/icon.png",
   "repository": {
@@ -373,6 +373,62 @@
           "type": "integer",
           "default": 200,
           "description": "Batch size for fetching work items (max 200)"
+        },
+        "adoQueries.detailFields": {
+          "type": "array",
+          "default": [],
+          "markdownDescription": "Fields to show in the task detail pane, in order. Leave empty to use the default set. Use ADO field reference names (e.g. `System.AssignedTo`) or local keys (`local.when`, `local.deadline`, `local.tags`).",
+          "items": {
+            "type": "string",
+            "enum": [
+              "System.Description",
+              "System.State",
+              "System.Reason",
+              "System.AssignedTo",
+              "System.AreaPath",
+              "System.IterationPath",
+              "Microsoft.VSTS.Common.Priority",
+              "Microsoft.VSTS.Common.Severity",
+              "Microsoft.VSTS.Scheduling.StoryPoints",
+              "Microsoft.VSTS.Scheduling.Effort",
+              "Microsoft.VSTS.Scheduling.RemainingWork",
+              "Microsoft.VSTS.Scheduling.OriginalEstimate",
+              "Microsoft.VSTS.Scheduling.StartDate",
+              "Microsoft.VSTS.Scheduling.DueDate",
+              "System.Tags",
+              "System.CreatedBy",
+              "System.CreatedDate",
+              "System.ChangedBy",
+              "System.ChangedDate",
+              "local.when",
+              "local.deadline",
+              "local.tags"
+            ],
+            "enumDescriptions": [
+              "ADO rich-text description",
+              "Work item state (read-only here; change via the row action)",
+              "Reason (editable)",
+              "Assigned identity",
+              "Area path",
+              "Iteration path",
+              "Priority 1–4 (editable)",
+              "Severity (editable)",
+              "Story points (editable)",
+              "Effort (editable)",
+              "Remaining work (editable)",
+              "Original estimate (editable)",
+              "Start date (editable)",
+              "Due date (editable)",
+              "ADO tags (editable)",
+              "Created by",
+              "Created date",
+              "Changed by",
+              "Changed date",
+              "Local do-date (editable)",
+              "Local deadline (editable)",
+              "Local tags"
+            ]
+          }
         }
       }
     }

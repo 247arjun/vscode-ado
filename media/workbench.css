@@ -291,6 +291,23 @@ body {
     word-break: break-word;
 }
 
+.detail-input {
+    width: 100%;
+    box-sizing: border-box;
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border, var(--vscode-editorWidget-border, transparent));
+    border-radius: 4px;
+    padding: 3px 6px;
+    font-size: 13px;
+    font-family: inherit;
+}
+
+.detail-input:focus {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+}
+
 .detail-section-label {
     text-transform: uppercase;
     font-size: 11px;
