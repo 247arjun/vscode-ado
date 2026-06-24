@@ -39,7 +39,15 @@ export async function activate(context: vscode.ExtensionContext) {
     dataStore = new DatabaseDataStore(database, adoClient, restClient);
 
     // ── Sync engine (pull) + status bar ──────────────────────────────
-    syncEngine = new SyncEngine(database, restClient, outputChannel);
+    syncEngine = new SyncEngine(database, restClient, outputChannel, async (info) => {
+        const choice = await vscode.window.showWarningMessage(
+            `Conflict on #${info.adoId}: you set ${info.field.split('.').pop()} = "${String(info.mine)}", but ADO now has "${String(info.theirs)}".`,
+            { modal: true },
+            'Keep Mine',
+            'Keep Theirs'
+        );
+        return choice === 'Keep Mine' ? 'mine' : 'theirs';
+    });
     context.subscriptions.push({ dispose: () => syncEngine?.dispose() });
     syncStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 49);
     syncStatusBar.command = 'adoQueries.refresh';
@@ -426,36 +434,31 @@ export async function activate(context: vscode.ExtensionContext) {
 
             if (!picked) return;
 
-            // Build a QueryDefinition for connection args
-            const queryDef: QueryDefinition | undefined = parentQuery
-                ? { name: parentQuery.name, queryId: parentQuery.queryId, queryPath: parentQuery.queryPath, organization: org, project }
-                : undefined;
-
-            // Update the work item
-            const result = await vscode.window.withProgress(
+            // Optimistic local update + enqueue to the outbox (Phase 3). The DB
+            // reflects the change immediately; the push (with conflict handling)
+            // happens in the background via the sync engine.
+            await vscode.window.withProgress(
                 { location: vscode.ProgressLocation.Notification, title: `Updating #${workItemNode.id}...` },
-                () => adoClient.updateWorkItemState(workItemNode.id, picked.label, queryDef)
+                async () => {
+                    await syncEngine?.enqueueStateChange(workItemNode.id, picked.label);
+                }
             );
 
-            if (result.success) {
-                vscode.window.showInformationMessage(`#${workItemNode.id} → ${picked.label}`);
+            vscode.window.showInformationMessage(`#${workItemNode.id} → ${picked.label}`);
 
-                // Refresh the parent query to reflect the change
-                if (parentQuery) {
-                    const index = treeProvider.findQueryIndex(parentQuery);
-                    if (index >= 0) {
-                        adoClient.clearCacheForQuery({
-                            name: parentQuery.name,
-                            queryId: parentQuery.queryId,
-                            queryPath: parentQuery.queryPath,
-                            organization: org,
-                            project
-                        });
-                        await treeProvider.refreshSingleQuery(index);
-                    }
+            // Refresh the parent query to reflect the change
+            if (parentQuery) {
+                const index = treeProvider.findQueryIndex(parentQuery);
+                if (index >= 0) {
+                    dataStore?.clearCacheForQuery({
+                        name: parentQuery.name,
+                        queryId: parentQuery.queryId,
+                        queryPath: parentQuery.queryPath,
+                        organization: org,
+                        project
+                    });
+                    await treeProvider.refreshSingleQuery(index);
                 }
-            } else {
-                vscode.window.showErrorMessage(`Failed to update state: ${result.error?.message}`);
             }
         })
     );

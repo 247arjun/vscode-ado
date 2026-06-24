@@ -4,6 +4,8 @@ import { Database } from '../db/Database';
 import { WorkItemRepository, workItemRowFromAdo } from '../db/repositories/WorkItemRepository';
 import { TaskRepository } from '../db/repositories/TaskRepository';
 import { SyncStateRepository } from '../db/repositories/SyncStateRepository';
+import { OutboxProcessor } from './OutboxProcessor';
+import { ConflictResolver, ConflictPrompt } from './ConflictResolver';
 import { QueryDefinition, Settings } from '../config/Settings';
 
 /** Standard set of fields we mirror for every work item. */
@@ -40,6 +42,7 @@ export class SyncEngine {
     private readonly workItems: WorkItemRepository;
     private readonly tasks: TaskRepository;
     private readonly syncState: SyncStateRepository;
+    private readonly outbox: OutboxProcessor;
 
     private _status: SyncStatus = { phase: 'idle', pendingCount: 0 };
     private readonly _onDidChangeStatus = new vscode.EventEmitter<SyncStatus>();
@@ -50,11 +53,16 @@ export class SyncEngine {
     constructor(
         private readonly db: Database,
         private readonly rest: AdoRestClient,
-        private readonly outputChannel: vscode.OutputChannel
+        private readonly outputChannel: vscode.OutputChannel,
+        prompt?: ConflictPrompt
     ) {
         this.workItems = new WorkItemRepository(db);
         this.tasks = new TaskRepository(db);
         this.syncState = new SyncStateRepository(db);
+        const defaultPrompt: ConflictPrompt = async () => 'theirs';
+        const resolver = new ConflictResolver(rest, this.workItems, prompt ?? defaultPrompt, (m) => this.log(m));
+        this.outbox = new OutboxProcessor(db, rest, resolver, (m) => this.log(m));
+        this.setStatus({ pendingCount: this.outbox.pendingCount });
     }
 
     get status(): SyncStatus {
@@ -63,6 +71,19 @@ export class SyncEngine {
 
     get taskRepository(): TaskRepository {
         return this.tasks;
+    }
+
+    /** Optimistically enqueue an ADO state change and drain the outbox. */
+    async enqueueStateChange(adoId: number, newState: string): Promise<void> {
+        this.outbox.enqueueStateChange(adoId, newState);
+        this.setStatus({ pendingCount: this.outbox.pendingCount });
+        await this.processOutbox();
+    }
+
+    /** Drain the outbox once and refresh the pending count. */
+    async processOutbox(): Promise<void> {
+        await this.outbox.process();
+        this.setStatus({ pendingCount: this.outbox.pendingCount });
     }
 
     private setStatus(patch: Partial<SyncStatus>): void {
@@ -132,6 +153,9 @@ export class SyncEngine {
         }
 
         if (myGen !== this.generation) return;
+
+        // Drain any pending local changes as part of each sync cycle.
+        await this.processOutbox();
 
         if (!anyOnline && anyError) {
             this.setStatus({ phase: 'offline', message: 'Offline — showing cached data' });
