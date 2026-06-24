@@ -1,5 +1,7 @@
 import { CliResult } from '../ado/AzCliRunner';
 import { WorkItem, AdoClient, WorkItemTypeState } from '../ado/AdoClient';
+import { AdoRestClient } from '../ado/AdoRestClient';
+import { DEFAULT_FIELDS } from '../sync/SyncEngine';
 import { QueryDefinition, Settings } from '../config/Settings';
 import { DataStore } from '../data/DataStore';
 import { Database } from './Database';
@@ -25,7 +27,8 @@ export class DatabaseDataStore implements DataStore {
 
     constructor(
         private readonly db: Database,
-        private readonly live: AdoClient
+        private readonly live: AdoClient,
+        private readonly rest?: AdoRestClient
     ) {
         this.workItems = new WorkItemRepository(db);
         this.tasks = new TaskRepository(db);
@@ -57,23 +60,51 @@ export class DatabaseDataStore implements DataStore {
         this.db.save();
     }
 
+    /** Mirror work items into the DB, reconcile tasks, and snapshot for offline. */
+    private mirror(queryDef: QueryDefinition, key: string, items: WorkItem[]): void {
+        const org = queryDef.organization ?? Settings.organization;
+        const project = queryDef.project ?? Settings.project;
+        for (const wi of items) {
+            this.workItems.upsert(workItemRowFromAdo(wi.id, wi.fields, 0, org, project, wi.url));
+            const title = typeof wi.fields['System.Title'] === 'string' ? (wi.fields['System.Title'] as string) : `#${wi.id}`;
+            const state = typeof wi.fields['System.State'] === 'string' ? (wi.fields['System.State'] as string) : undefined;
+            this.tasks.reconcileFromWorkItem(wi.id, title, state);
+        }
+        this.writeSnapshot(key, items);
+    }
+
+    /** Fetch a query via REST (preferred). Returns undefined if not eligible/possible. */
+    private async fetchViaRest(queryDef: QueryDefinition): Promise<WorkItem[] | undefined> {
+        if (!this.rest) return undefined;
+        const org = queryDef.organization ?? Settings.organization;
+        const project = queryDef.project ?? Settings.project;
+        if (!org || !project || !queryDef.queryId) return undefined;
+
+        const ids = await this.rest.runSavedQuery(org, project, queryDef.queryId);
+        if (ids === undefined) return undefined;
+        const limited = ids.slice(0, Settings.maxItems);
+        const items = await this.rest.batchGetWorkItems(org, project, limited, DEFAULT_FIELDS);
+        return items ?? undefined;
+    }
+
     async getWorkItemsForQuery(queryDef: QueryDefinition): Promise<CliResult<WorkItem[]>> {
         const key = this.cacheKey(queryDef);
-        const result = await this.live.getWorkItemsForQuery(queryDef);
 
-        if (result.success && result.data) {
-            const org = queryDef.organization ?? Settings.organization;
-            const project = queryDef.project ?? Settings.project;
-
-            // Mirror into the DB and reconcile tasks.
-            for (const wi of result.data) {
-                this.workItems.upsert(workItemRowFromAdo(wi.id, wi.fields, 0, org, project, wi.url));
-                const title = typeof wi.fields['System.Title'] === 'string' ? (wi.fields['System.Title'] as string) : `#${wi.id}`;
-                const state = typeof wi.fields['System.State'] === 'string' ? (wi.fields['System.State'] as string) : undefined;
-                this.tasks.reconcileFromWorkItem(wi.id, title, state);
+        // Preferred transport: token-authenticated REST (no CLI process spawn).
+        try {
+            const restItems = await this.fetchViaRest(queryDef);
+            if (restItems) {
+                this.mirror(queryDef, key, restItems);
+                return { success: true, data: restItems, exitCode: 0 };
             }
+        } catch {
+            // fall through to CLI / snapshot
+        }
 
-            this.writeSnapshot(key, result.data);
+        // Fallback transport: Azure CLI.
+        const result = await this.live.getWorkItemsForQuery(queryDef);
+        if (result.success && result.data) {
+            this.mirror(queryDef, key, result.data);
             return result;
         }
 

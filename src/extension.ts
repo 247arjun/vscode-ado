@@ -6,13 +6,19 @@ import { WorkItemNode, QueryNode } from './grouping/GroupingEngine';
 import { extractQueryInfoFromUrl } from './utils/urlParser';
 import { AzCliRunner } from './ado/AzCliRunner';
 import { AdoClient } from './ado/AdoClient';
+import { AdoRestClient } from './ado/AdoRestClient';
 import { Database } from './db/Database';
 import { DatabaseDataStore } from './db/DatabaseDataStore';
+import { TokenProvider } from './auth/TokenProvider';
+import { SyncEngine, SyncStatus } from './sync/SyncEngine';
 
 let treeProvider: AdoTreeProvider | undefined;
 let treeView: vscode.TreeView<AdoTreeItem> | undefined;
 let database: Database | undefined;
 let dataStore: DatabaseDataStore | undefined;
+let tokenProvider: TokenProvider | undefined;
+let syncEngine: SyncEngine | undefined;
+let syncStatusBar: vscode.StatusBarItem | undefined;
 
 export async function activate(context: vscode.ExtensionContext) {
     console.log('Azure DevOps Queries extension is now active');
@@ -25,7 +31,48 @@ export async function activate(context: vscode.ExtensionContext) {
 
     const cliRunner = new AzCliRunner();
     const adoClient = new AdoClient(cliRunner, outputChannel);
-    dataStore = new DatabaseDataStore(database, adoClient);
+
+    // ── Auth + REST transport (no PAT, no app registration) ──────────
+    tokenProvider = new TokenProvider(cliRunner);
+    context.subscriptions.push({ dispose: () => tokenProvider?.dispose() });
+    const restClient = new AdoRestClient(tokenProvider);
+    dataStore = new DatabaseDataStore(database, adoClient, restClient);
+
+    // ── Sync engine (pull) + status bar ──────────────────────────────
+    syncEngine = new SyncEngine(database, restClient, outputChannel);
+    context.subscriptions.push({ dispose: () => syncEngine?.dispose() });
+    syncStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 49);
+    syncStatusBar.command = 'adoQueries.refresh';
+    context.subscriptions.push(syncStatusBar);
+    syncEngine.onDidChangeStatus((s) => updateSyncStatusBar(s));
+    updateSyncStatusBar(syncEngine.status);
+
+    // Reflect sign-in state in a context key (drives the welcome CTA).
+    const refreshAuthContext = async () => {
+        const signedIn = (await tokenProvider?.isSignedIn()) ?? false;
+        await vscode.commands.executeCommand('setContext', 'adoQueries.signedIn', signedIn);
+    };
+    tokenProvider.onDidChangeAuth(() => { void refreshAuthContext(); });
+    void refreshAuthContext();
+
+    // Sign-in command (interactive).
+    context.subscriptions.push(
+        vscode.commands.registerCommand('adoQueries.signIn', async () => {
+            const ok = await tokenProvider?.signIn();
+            if (ok) {
+                vscode.window.showInformationMessage('Signed in to Azure DevOps.');
+                treeProvider?.forceRefresh();
+            } else {
+                vscode.window.showWarningMessage('Azure DevOps sign-in was canceled or failed.');
+            }
+        })
+    );
+
+    // Background pull on activation (after first paint) and on focus.
+    const runPull = () => { void syncEngine?.pull(Settings.getActiveQueries()); };
+    context.subscriptions.push(
+        vscode.window.onDidChangeWindowState((st) => { if (st.focused) runPull(); })
+    );
 
     // Create the tree provider, reading through the DB-backed store
     treeProvider = new AdoTreeProvider({ adoClient, dataStore });
@@ -415,9 +462,36 @@ export async function activate(context: vscode.ExtensionContext) {
 
     // Initial refresh
     treeProvider.refresh();
+    // Background pull (non-blocking) once the view is up.
+    runPull();
 }
 
 // ─── Helper functions ────────────────────────────────────────────────
+
+/**
+ * Render the sync engine status into the dedicated status bar item.
+ */
+function updateSyncStatusBar(status: SyncStatus): void {
+    if (!syncStatusBar) return;
+    switch (status.phase) {
+        case 'syncing':
+            syncStatusBar.text = '$(sync~spin) ADO: syncing…';
+            break;
+        case 'offline':
+            syncStatusBar.text = '$(cloud-offline) ADO: offline';
+            break;
+        case 'error':
+            syncStatusBar.text = '$(warning) ADO: sync issue';
+            break;
+        default: {
+            const when = status.lastSyncedUtc ? new Date(status.lastSyncedUtc).toLocaleTimeString() : 'never';
+            const pending = status.pendingCount > 0 ? ` · ${status.pendingCount} pending` : '';
+            syncStatusBar.text = `$(check) ADO: synced ${when}${pending}`;
+        }
+    }
+    syncStatusBar.tooltip = status.message ?? 'Azure DevOps sync';
+    syncStatusBar.show();
+}
 
 /**
  * Determine the appropriate settings target (workspace if available, else global)

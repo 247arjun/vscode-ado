@@ -36,7 +36,12 @@
     "viewsWelcome": [
       {
         "view": "adoQueries.results",
-        "contents": "No Azure DevOps queries configured.\n[Add Query from Clipboard](command:adoQueries.setQueryFromClipboard)\n[Add Query Manually](command:adoQueries.setQueryManual)\nCopy a query URL from Azure DevOps, then click \"Add Query from Clipboard\" to get started.\n[Learn More](command:adoQueries.showOutput)"
+        "contents": "No Azure DevOps queries configured.\n[Add Query from Clipboard](command:adoQueries.setQueryFromClipboard)\n[Add Query Manually](command:adoQueries.setQueryManual)\nCopy a query URL from Azure DevOps, then click \"Add Query from Clipboard\" to get started.\n[Learn More](command:adoQueries.showOutput)",
+        "when": "adoQueries.signedIn"
+      },
+      {
+        "view": "adoQueries.results",
+        "contents": "Sign in to Azure DevOps to sync your work items.\n[Sign in to Azure DevOps](command:adoQueries.signIn)\nUses your existing VS Code Microsoft account — no personal access token required."
       }
     ],
     "commands": [
@@ -99,6 +104,10 @@
       {
         "command": "adoQueries.showOutput",
         "title": "Azure DevOps: Show Output Log"
+      },
+      {
+        "command": "adoQueries.signIn",
+        "title": "Azure DevOps: Sign In"
       }
     ],
     "keybindings": [
