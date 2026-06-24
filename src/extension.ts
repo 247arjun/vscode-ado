@@ -373,12 +373,36 @@ export async function activate(context: vscode.ExtensionContext) {
             const chosenKeys = new Set(chosen.map(c => c.detail));
             const ordered = DETAIL_FIELD_CATALOG.filter(d => chosenKeys.has(d.key)).map(d => d.key);
 
-            const target = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0
+            // Write to whichever target is currently in use, defaulting to Global
+            // (User) settings. Fall back gracefully if a target can't be written.
+            const cfg = vscode.workspace.getConfiguration('adoQueries');
+            const inspected = cfg.inspect<string[]>('detailFields');
+            const hasWorkspace = (vscode.workspace.workspaceFolders?.length ?? 0) > 0;
+            const target = inspected?.workspaceValue !== undefined && hasWorkspace
                 ? vscode.ConfigurationTarget.Workspace
                 : vscode.ConfigurationTarget.Global;
-            await vscode.workspace.getConfiguration('adoQueries').update('detailFields', ordered, target);
-            workbench?.postSnapshot();
-            vscode.window.showInformationMessage(`Detail pane will show ${ordered.length} field(s).`);
+            try {
+                await cfg.update('detailFields', ordered, target);
+                workbench?.postSnapshot();
+                vscode.window.showInformationMessage(`Detail pane will show ${ordered.length} field(s).`);
+            } catch (err) {
+                // Most often: a stale installed build whose manifest doesn't yet
+                // register this setting. Try Global, then guide the user.
+                try {
+                    await cfg.update('detailFields', ordered, vscode.ConfigurationTarget.Global);
+                    workbench?.postSnapshot();
+                    vscode.window.showInformationMessage(`Detail pane will show ${ordered.length} field(s).`);
+                } catch {
+                    vscode.window.showErrorMessage(
+                        'Could not save the field selection. Reload the window (or reinstall the latest version) and try again.',
+                        'Open Settings'
+                    ).then(choice => {
+                        if (choice === 'Open Settings') {
+                            void vscode.commands.executeCommand('workbench.action.openSettings', 'adoQueries.detailFields');
+                        }
+                    });
+                }
+            }
         })
     );
 
