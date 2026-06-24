@@ -125,9 +125,18 @@ Requirements:
 ## 6. Data model & local database
 
 ### 6.1 Storage choice
-Use an embedded **SQLite** database stored under the extension's **global storage** directory (obtained from the extension context at activation; create the directory if missing). Two acceptable engines:
-- **Preferred:** a SQLite library (native). If native-module/ABI bundling proves painful for our VS Code version, switch to a **WebAssembly SQLite** build and persist the database file ourselves. Decide in Phase 1 and document the choice in the repo README.
-- Wrap all DB access behind a `Database` class and **repository** classes. **No SQL strings outside the `src/db/` folder.**
+Use a persistent local store kept under the extension's **global storage** directory
+(obtained from the extension context at activation; create the directory if missing).
+
+**Decision (implemented):** a **dependency-free, pure-TypeScript embedded store**
+(`src/db/Database.ts`) that holds typed collections in memory and persists them
+atomically to a single JSON file. This was chosen over native SQLite
+(`better-sqlite3`) and WASM SQLite (`sql.js`) because it adds **no third-party or
+native dependency** (important for a locked-down corp environment and supply-chain
+safety), runs identically in Node tests and VS Code's Electron with no rebuild, and
+is trivially debuggable. All access goes through a `Database` class and **repository**
+classes, so the engine can later be swapped for real SQLite **without changing any
+repository consumer**. **No storage internals leak outside the `src/db/` folder.**
 
 ### 6.2 Schema (declarative — specify exact columns)
 

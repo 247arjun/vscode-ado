@@ -151,13 +151,13 @@ export class AdoTreeProvider implements vscode.TreeDataProvider<AdoTreeItem> {
     private totalWorkItemCount = 0;
     private outputChannel: vscode.OutputChannel;
 
-    constructor(dataStore?: DataStore) {
+    constructor(options?: { adoClient?: AdoClient; dataStore?: DataStore }) {
         this.cliRunner = new AzCliRunner();
         this.outputChannel = vscode.window.createOutputChannel('Azure DevOps Queries');
-        this.adoClient = new AdoClient(this.cliRunner, this.outputChannel);
+        this.adoClient = options?.adoClient ?? new AdoClient(this.cliRunner, this.outputChannel);
         // Read through the DataStore seam; defaults to a live pass-through over
-        // AdoClient, but later phases inject a database-backed store here.
-        this.dataStore = dataStore ?? new LiveDataStore(this.adoClient);
+        // AdoClient, but the extension injects a database-backed store here.
+        this.dataStore = options?.dataStore ?? new LiveDataStore(this.adoClient);
         this.groupingEngine = new GroupingEngine();
         
         // Create status bar item

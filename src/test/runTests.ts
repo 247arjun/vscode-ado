@@ -7,12 +7,21 @@
 
 import { runTests as runGroupingEngineTests } from './groupingEngine.test';
 import { runTests as runUrlParsingTests } from './urlParsing.test';
+import { runTests as runDatabaseTests } from './database.test';
 
-console.log('╔══════════════════════════════════════╗');
-console.log('║   Azure DevOps Queries – Tests       ║');
-console.log('╚══════════════════════════════════════╝');
+async function main(): Promise<void> {
+    console.log('╔══════════════════════════════════════╗');
+    console.log('║   Azure DevOps Queries – Tests       ║');
+    console.log('╚══════════════════════════════════════╝');
 
-runGroupingEngineTests();
-runUrlParsingTests();
+    runGroupingEngineTests();
+    runUrlParsingTests();
+    await runDatabaseTests();
 
-console.log('\n✔  All test suites passed.\n');
+    console.log('\n✔  All test suites passed.\n');
+}
+
+main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+});

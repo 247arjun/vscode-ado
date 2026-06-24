@@ -1,17 +1,34 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { AdoTreeProvider, AdoTreeItem } from './tree/AdoTreeProvider';
 import { Settings, QueryDefinition } from './config/Settings';
 import { WorkItemNode, QueryNode } from './grouping/GroupingEngine';
 import { extractQueryInfoFromUrl } from './utils/urlParser';
+import { AzCliRunner } from './ado/AzCliRunner';
+import { AdoClient } from './ado/AdoClient';
+import { Database } from './db/Database';
+import { DatabaseDataStore } from './db/DatabaseDataStore';
 
 let treeProvider: AdoTreeProvider | undefined;
 let treeView: vscode.TreeView<AdoTreeItem> | undefined;
+let database: Database | undefined;
+let dataStore: DatabaseDataStore | undefined;
 
-export function activate(context: vscode.ExtensionContext) {
+export async function activate(context: vscode.ExtensionContext) {
     console.log('Azure DevOps Queries extension is now active');
 
-    // Create the tree provider
-    treeProvider = new AdoTreeProvider();
+    // ── Local database (source of truth for the UI) ──────────────────
+    const outputChannel = vscode.window.createOutputChannel('Azure DevOps Queries');
+    const dbPath = path.join(context.globalStorageUri.fsPath, 'adothings.json');
+    database = await Database.open(dbPath);
+    outputChannel.appendLine(`[${new Date().toISOString()}] Local DB ready (schema v${database.schemaVersion}) at ${dbPath}`);
+
+    const cliRunner = new AzCliRunner();
+    const adoClient = new AdoClient(cliRunner, outputChannel);
+    dataStore = new DatabaseDataStore(database, adoClient);
+
+    // Create the tree provider, reading through the DB-backed store
+    treeProvider = new AdoTreeProvider({ adoClient, dataStore });
 
     // Register the tree view
     treeView = vscode.window.createTreeView('adoQueries.results', {
@@ -491,5 +508,9 @@ export function deactivate() {
     if (treeProvider) {
         treeProvider.dispose();
         treeProvider = undefined;
+    }
+    if (database) {
+        database.close();
+        database = undefined;
     }
 }
